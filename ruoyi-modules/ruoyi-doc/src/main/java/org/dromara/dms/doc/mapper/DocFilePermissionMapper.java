@@ -19,15 +19,24 @@ import java.util.List;
 public interface DocFilePermissionMapper extends MPJBaseMapper<DocFilePermission> {
 
     /**
-     * 汇总文件权限位
+     * 汇总文件权限位（主体集合由服务层展开）
      */
-    @Select(value = "SELECT COALESCE(BIT_OR(perm_flags), 0) FROM doc_file_permission " +
+    @Select("<script>" +
+            "SELECT COALESCE(BIT_OR(perm_flags), 0) FROM doc_file_permission " +
             "WHERE file_id = #{fileId} " +
+            "  AND (expires_at IS NULL OR expires_at &gt; NOW()) " +
             "  AND ( " +
             "    (subject_type = 'user' AND subject_id = #{userId}) " +
-            "    OR (subject_type = 'role' AND subject_id IN (SELECT role_id FROM sys_user_role WHERE user_id = #{userId})) " +
-            "    OR (subject_type = 'dept' AND subject_id IN (SELECT ancestor_id FROM sys_dept_ancestor WHERE descendant_id = #{deptId})) " +
-            "  )")
+            "    <if test='roleIds != null and roleIds.size() &gt; 0'>" +
+            "    OR (subject_type = 'role' AND subject_id IN " +
+            "        <foreach collection='roleIds' item='rid' open='(' separator=',' close=')'>#{rid}</foreach>)" +
+            "    </if>" +
+            "    <if test='deptIds != null and deptIds.size() &gt; 0'>" +
+            "    OR (subject_type = 'dept' AND subject_id IN " +
+            "        <foreach collection='deptIds' item='did' open='(' separator=',' close=')'>#{did}</foreach>)" +
+            "    </if>" +
+            "  )" +
+            "</script>")
     int sumFlags(@Param("fileId") Long fileId,
                  @Param("userId") Long userId,
                  @Param("roleIds") Collection<Long> roleIds,

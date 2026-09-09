@@ -19,19 +19,26 @@ import java.util.List;
 public interface DocFolderPermissionMapper extends MPJBaseMapper<DocFolderPermission> {
 
     /**
-     * 汇总一个文件夹在某用户上的有效权限位（取所有 subject 的 OR）
+     * 汇总文件夹在某用户主体集合上的有效权限位
      *
-     * <p>subject 类型：user / role / dept
-     * user 取 user_id 匹配；role 取 sys_user_role 关联；dept 取 dept_id 匹配
+     * <p>调用方需预先展开主体集合：userId + 用户全部 roleId + 用户部门及其所有祖先 deptId。
      */
-    @Select(value = "SELECT COALESCE(BIT_OR(perm_flags), 0) FROM doc_folder_permission " +
+    @Select("<script>" +
+            "SELECT COALESCE(BIT_OR(perm_flags), 0) FROM doc_folder_permission " +
             "WHERE folder_id = #{folderId} " +
-            "  AND (deleted_at IS NULL OR deleted_at > NOW()) " +  // 注：权限表没有 deleted_at 字段
+            "  AND (expires_at IS NULL OR expires_at &gt; NOW()) " +
             "  AND ( " +
             "    (subject_type = 'user' AND subject_id = #{userId}) " +
-            "    OR (subject_type = 'role' AND subject_id IN (SELECT role_id FROM sys_user_role WHERE user_id = #{userId})) " +
-            "    OR (subject_type = 'dept' AND subject_id IN (SELECT ancestor_id FROM sys_Dept_ancestor WHERE descendant_id = #{deptId})) " +
-            "  )")
+            "    <if test='roleIds != null and roleIds.size() &gt; 0'>" +
+            "    OR (subject_type = 'role' AND subject_id IN " +
+            "        <foreach collection='roleIds' item='rid' open='(' separator=',' close=')'>#{rid}</foreach>)" +
+            "    </if>" +
+            "    <if test='deptIds != null and deptIds.size() &gt; 0'>" +
+            "    OR (subject_type = 'dept' AND subject_id IN " +
+            "        <foreach collection='deptIds' item='did' open='(' separator=',' close=')'>#{did}</foreach>)" +
+            "    </if>" +
+            "  )" +
+            "</script>")
     int sumFlags(@Param("folderId") Long folderId,
                  @Param("userId") Long userId,
                  @Param("roleIds") Collection<Long> roleIds,
