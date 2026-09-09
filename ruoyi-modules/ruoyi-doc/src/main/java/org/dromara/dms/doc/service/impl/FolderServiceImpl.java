@@ -3,6 +3,7 @@ package org.dromara.dms.doc.service.impl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.dms.doc.domain.DocFolder;
+import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
 import org.dromara.dms.doc.mapper.DocFolderPermissionMapper;
 import org.dromara.dms.doc.service.FolderService;
@@ -28,6 +29,7 @@ public class FolderServiceImpl implements FolderService {
     private final DocFolderMapper folderMapper;
     private final DocFolderPermissionMapper folderPermMapper;
     private final PermissionChecker permissionChecker;
+    private final DocFileMapper fileMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -82,18 +84,32 @@ public class FolderServiceImpl implements FolderService {
         DocFolder folder = folderMapper.selectById(folderId);
         if (folder == null) return;
 
-        // 软删除当前文件夹
-        folderMapper.softDelete(folderId, LocalDateTime.now());
-
-        // 递归软删除所有子文件夹
+        // 收集受影响文件夹：自身 + 全部后代
+        List<Long> affectedIds = new ArrayList<>();
+        affectedIds.add(folderId);
         List<DocFolder> descendants = folderMapper.listDescendants(folder.getFolderPath() + folderId + "/");
+        for (DocFolder d : descendants) {
+            affectedIds.add(d.getFolderId());
+        }
+
+        // 软删除文件夹本身 + 后代
+        folderMapper.softDelete(folderId, LocalDateTime.now());
         for (DocFolder d : descendants) {
             folderMapper.softDelete(d.getFolderId(), LocalDateTime.now());
         }
 
-        // TODO 软删除该文件夹下的所有文件（doc_file.deleted_at = now）
+        // 软删除这些文件夹下的所有文件（保持一致，进回收站）
+        for (Long fid : affectedIds) {
+            List<org.dromara.dms.doc.domain.DocFile> fs = fileMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<org.dromara.dms.doc.domain.DocFile>()
+                            .eq("folder_id", fid)
+                            .isNull("deleted_at"));
+            for (var f : fs) {
+                fileMapper.softDelete(f.getFileId(), LocalDateTime.now());
+            }
+        }
 
-        log.info("Folder soft deleted: id={}, descendants={}", folderId, descendants.size());
+        log.info("Folder soft deleted: id={}, folders={}, files also soft-deleted", folderId, affectedIds.size());
     }
 
     @Override
