@@ -1,8 +1,11 @@
 package org.dromara.dms.doc.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.dromara.dms.doc.domain.DocFile;
 
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -51,4 +54,19 @@ public interface FileService {
      * 全局搜索（PostgreSQL tsvector + pg_trgm）
      */
     List<DocFile> search(String keyword, int limit, Long userId);
+
+    /**
+     * 下载原文件（支持 HTTP Range）
+     */
+    void download(Long fileId, HttpServletRequest request, HttpServletResponse response) throws IOException;
+
+    /**
+     * 流式输出文件内容（预览用，浏览器 Content-Type 渲染）
+     */
+    void streamContent(Long fileId, HttpServletRequest request, HttpServletResponse response) throws IOException;
+
+    /**
+     * 流式输出缩略图
+     */
+    void streamThumbnail(Long fileId, HttpServletResponse response) throws IOException;
 }

@@ -81,13 +81,14 @@ public interface DocFileMapper extends MPJBaseMapper<DocFile> {
     DocFile findByHash(@Param("hash") String hash);
 
     /**
-     * 全文搜索（PostgreSQL tsvector）
+     * 全文搜索（文件名 ILIKE + 提取文本 ILIKE，支持中英文；pg_trgm 索引加速前缀/模糊）
      */
-    @Select(value = "SELECT *, " +
-            "ts_rank(search_vector, plainto_tsquery('simple', #{keyword})) AS rank " +
-            "FROM doc_file " +
-            "WHERE search_vector @@ plainto_tsquery('simple', #{keyword}) " +
-            "  AND deleted_at IS NULL " +
-            "ORDER BY rank DESC LIMIT #{limit}")
+    @Select(value = "SELECT f.* FROM doc_file f " +
+            "LEFT JOIN doc_file_text t ON t.file_id = f.file_id " +
+            "WHERE f.deleted_at IS NULL AND ( " +
+            "  f.file_name ILIKE '%' || #{keyword} || '%' " +
+            "  OR f.description ILIKE '%' || #{keyword} || '%' " +
+            "  OR t.extract_text ILIKE '%' || #{keyword} || '%' " +
+            ") ORDER BY f.create_time DESC LIMIT #{limit}")
     List<DocFile> fulltextSearch(@Param("keyword") String keyword, @Param("limit") int limit);
 }

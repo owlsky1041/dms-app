@@ -1,6 +1,8 @@
 package org.dromara.dms.doc.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.domain.R;
@@ -12,6 +14,8 @@ import org.dromara.dms.doc.service.FileService;
 import org.dromara.dms.doc.service.PermissionChecker;
 import org.dromara.dms.doc.enums.PermissionFlag;
 import org.springframework.web.bind.annotation.*;
+
+import java.io.IOException;
 
 /**
  * 文件 REST API
@@ -90,6 +94,43 @@ public class FileController {
                        @RequestParam(defaultValue = "20") int limit) {
         Long userId = LoginHelper.getUserId();
         return R.ok(fileService.search(keyword, limit, userId));
+    }
+
+    /**
+     * 下载原文件（支持 HTTP Range 分段下载）
+     *
+     * <p>从 MinIO 流式转发，Range 请求返回 206。
+     */
+    @GetMapping("/{fileId}/download")
+    public void download(@PathVariable Long fileId,
+                         HttpServletRequest request,
+                         HttpServletResponse response) throws IOException {
+        Long userId = LoginHelper.getUserId();
+        fileService.download(fileId, request, response);
+    }
+
+    /**
+     * 预览（PDF.js 等用的流式 PDF，或图片原图）
+     *
+     * <p>返回原始字节；浏览器通过 Content-Type 自行渲染。
+     * PDF 预览走 /{fileId}/preview 流，PDF.js 在浏览器端渲染。
+     */
+    @GetMapping("/{fileId}/preview")
+    public void preview(@PathVariable Long fileId,
+                        HttpServletRequest request,
+                        HttpServletResponse response) throws IOException {
+        Long userId = LoginHelper.getUserId();
+        fileService.streamContent(fileId, request, response);
+    }
+
+    /**
+     * 缩略图（PNG/JPG，暂未生成则返回 204）
+     */
+    @GetMapping("/{fileId}/thumbnail")
+    public void thumbnail(@PathVariable Long fileId,
+                          HttpServletResponse response) throws IOException {
+        Long userId = LoginHelper.getUserId();
+        fileService.streamThumbnail(fileId, response);
     }
 
     /**
