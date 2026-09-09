@@ -93,7 +93,13 @@ public class FileServiceImpl implements FileService {
     @Override
     public void streamContent(Long fileId, HttpServletRequest request, HttpServletResponse response) throws IOException {
         DocFile file = mustGet(fileId);
-        streamFromMinIo(file, request, response, false);
+        // 有 preview_key（如 Office 转换的 PDF）则输出预览版；否则输出原文件
+        if (file.getPreviewKey() != null && !file.getPreviewKey().isBlank()) {
+            streamKeyWithMime(file, file.getStorageBucket(), file.getPreviewKey(),
+                    "application/pdf", request, response, false);
+        } else {
+            streamFromMinIo(file, request, response, false);
+        }
     }
 
     @Override
@@ -217,6 +223,72 @@ public class FileServiceImpl implements FileService {
         } catch (Exception e) {
             log.error("writeFull stream failed: bucket={}, key={}", bucket, key, e);
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * 流式输出指定 key（带 Content-Disposition 文件名），支持 Range
+     */
+    private void streamKeyWithMime(DocFile file, String bucket, String key, String contentType,
+                                   HttpServletRequest request, HttpServletResponse response,
+                                   boolean asAttachment) throws IOException {
+        long totalSize;
+        try {
+            var stat = minioClient.statObject(StatObjectArgs.builder().bucket(bucket).object(key).build());
+            totalSize = stat.size();
+        } catch (Exception e) {
+            log.error("statObject failed: bucket={}, key={}", bucket, key, e);
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            return;
+        }
+
+        String encoded = URLEncoder.encode(
+                asAttachment ? (file.getFileName() == null ? "download" : file.getFileName())
+                        : (file.getFileName() == null ? "preview" : file.getFileName()),
+                StandardCharsets.UTF_8).replace("+", "%20");
+        response.setHeader("Content-Disposition",
+                (asAttachment ? "attachment" : "inline") + "; filename*=UTF-8''" + encoded);
+
+        String rangeHeader = request.getHeader("Range");
+        long start = 0;
+        long end = totalSize - 1;
+        boolean partial = false;
+        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+            String spec = rangeHeader.substring("bytes=".length()).trim();
+            if (!spec.isBlank()) {
+                String[] parts = spec.split("-", 2);
+                try {
+                    if (!parts[0].isBlank()) start = Long.parseLong(parts[0]);
+                    if (parts.length > 1 && !parts[1].isBlank()) {
+                        end = Math.min(Long.parseLong(parts[1]), totalSize - 1);
+                    }
+                    partial = true;
+                } catch (NumberFormatException ignore) {
+                    partial = false;
+                }
+            }
+        }
+        if (start > end || start < 0) {
+            response.setStatus(HttpServletResponse.SC_REQUESTED_RANGE_NOT_SATISFIABLE);
+            response.setHeader("Content-Range", "bytes */" + totalSize);
+            return;
+        }
+        long length = end - start + 1;
+        response.setStatus(partial ? HttpServletResponse.SC_PARTIAL_CONTENT : HttpServletResponse.SC_OK);
+        response.setHeader("Accept-Ranges", "bytes");
+        if (partial) {
+            response.setHeader("Content-Range", "bytes " + start + "-" + end + "/" + totalSize);
+        }
+        response.setContentType(contentType);
+        response.setContentLengthLong(length);
+        try (InputStream is = minioClient.getObject(GetObjectArgs.builder()
+                .bucket(bucket).object(key).offset(start).length(length).build());
+             OutputStream os = response.getOutputStream()) {
+            is.transferTo(os);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("streamKeyWithMime failed: bucket={}, key={}", bucket, key, e);
         }
     }
 
