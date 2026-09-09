@@ -65,6 +65,44 @@ public class FileServiceImpl implements FileService {
     }
 
     @Override
+    public Long copy(Long fileId, Long targetFolderId, Long userId) {
+        DocFile src = mustGet(fileId);
+        if (src.getDeletedAt() != null) {
+            throw new IllegalArgumentException("源文件已在回收站");
+        }
+        DocFile copy = new DocFile()
+                .setFolderId(targetFolderId)
+                .setFileName(src.getFileName())
+                .setFileExtension(src.getFileExtension())
+                .setFileSize(src.getFileSize())
+                .setFileHash(src.getFileHash())
+                .setMimeType(src.getMimeType())
+                .setStorageBackend(src.getStorageBackend())
+                .setStorageBucket(src.getStorageBucket())
+                .setStorageKey(src.getStorageKey())
+                .setPreviewKey(src.getPreviewKey())
+                .setThumbnailKey(src.getThumbnailKey())
+                .setPageCount(src.getPageCount())
+                .setCreatorId(userId)
+                .setCreateTime(LocalDateTime.now());
+        fileMapper.insert(copy);
+        log.info("File copied: src={} -> folder={}, newId={}", fileId, targetFolderId, copy.getFileId());
+        return copy.getFileId();
+    }
+
+    @Override
+    public int moveBatch(List<Long> fileIds, Long targetFolderId, Long userId) {
+        if (fileIds == null || fileIds.isEmpty()) return 0;
+        LocalDateTime now = LocalDateTime.now();
+        int n = 0;
+        for (Long id : fileIds) {
+            n += fileMapper.move(id, targetFolderId, now);
+        }
+        log.info("Moved {} files to folder {}", n, targetFolderId);
+        return n;
+    }
+
+    @Override
     public void softDelete(Long fileId, Long userId) {
         fileMapper.softDelete(fileId, LocalDateTime.now());
     }

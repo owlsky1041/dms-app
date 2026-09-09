@@ -10,6 +10,7 @@ import org.dromara.common.log.annotation.Log;
 import org.dromara.common.log.enums.BusinessType;
 import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.domain.DocFile;
+import org.dromara.dms.doc.dto.BatchMoveRequest;
 import org.dromara.dms.doc.service.FileService;
 import org.dromara.dms.doc.service.PermissionChecker;
 import org.dromara.dms.doc.enums.PermissionFlag;
@@ -71,6 +72,26 @@ public class FileController {
         Long userId = LoginHelper.getUserId();
         checkPerm(fileId, userId, PermissionFlag.EDIT);
         fileService.move(fileId, targetFolderId, userId);
+        return R.ok();
+    }
+
+    /**
+     * 复制到目标文件夹
+     */
+    @PostMapping("/{fileId}/copy")
+    public R<Long> copy(@PathVariable Long fileId, @RequestParam Long targetFolderId) {
+        Long userId = LoginHelper.getUserId();
+        Long newId = fileService.copy(fileId, targetFolderId, userId);
+        return R.ok(newId);
+    }
+
+    /**
+     * 批量移动（粘贴"剪切"的文件）
+     */
+    @PutMapping("/batch-move")
+    public R<Void> batchMove(@RequestBody BatchMoveRequest req) {
+        Long userId = LoginHelper.getUserId();
+        fileService.moveBatch(req.getFileIds(), req.getTargetFolderId(), userId);
         return R.ok();
     }
 

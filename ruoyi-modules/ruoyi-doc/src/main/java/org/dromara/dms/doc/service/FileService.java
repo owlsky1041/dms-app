@@ -36,6 +36,18 @@ public interface FileService {
     void move(Long fileId, Long targetFolderId, Long userId);
 
     /**
+     * 复制文件到目标文件夹（新建 doc_file 行引用同一存储对象）
+     *
+     * @return 新 file_id
+     */
+    Long copy(Long fileId, Long targetFolderId, Long userId);
+
+    /**
+     * 批量移动
+     */
+    int moveBatch(List<Long> fileIds, Long targetFolderId, Long userId);
+
+    /**
      * 软删除
      */
     void softDelete(Long fileId, Long userId);
