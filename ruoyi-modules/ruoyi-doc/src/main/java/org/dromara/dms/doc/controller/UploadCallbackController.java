@@ -12,20 +12,18 @@ import org.dromara.dms.doc.service.UploadCompletionDelegate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * 上传相关回调接口
  *
- * <p>tus 1.0.0-3.3 没有自动完成回调，客户端在 tus 上传完成后调：
- * <ul>
- *   <li>{@code GET /api/upload/tus/{uploadId}}    查询上传进度（返回 Tus-Offset 等头）</li>
- *   <li>{@code POST /api/upload/{uploadId}/complete}    触发业务元数据写入</li>
- *   <li>{@code DELETE /api/upload/tus/{uploadId}}    取消上传</li>
- * </ul>
+ * <p>tus 1.0.0-3.3 没有自动完成回调，客户端在 tus 上传完成后调
+ * {@code POST /api/upload/complete}（body: { uploadUrl, fileName }）触发业务落库。
  *
  * @author DMS
  */
@@ -39,30 +37,57 @@ public class UploadCallbackController {
     private final UploadCompletionDelegate completionDelegate;
 
     /**
-     * tus 完成回调（业务处理）
+     * tus 完成回调（业务处理）—— 前端主入口
      *
-     * <p>前端在 tus 上传成功后调此接口，触发：
-     * <ol>
-     *   <li>从 tus 元数据读取 fileName/folderId/userId</li>
-     *   <li>把分块合并文件并上传到 MinIO</li>
-     *   <li>写 doc_file 表元数据</li>
-     *   <li>异步触发 FileProcessor（缩略图/预览/文本提取）</li>
-     *   <li>删除 tus 临时分块</li>
-     * </ol>
+     * @param body 含 uploadUrl（Uppy response.uploadURL，完整 tus Location）与 fileName
      */
-    @PostMapping("/{uploadId}/complete")
-    public R<Void> completeUpload(@PathVariable String uploadId) {
+    @PostMapping("/complete")
+    public R<Void> completeUpload(@RequestBody Map<String, String> body) {
+        String uploadUrl = body.get("uploadUrl");
         Long userId = LoginHelper.getUserId();
+        if (uploadUrl == null || uploadUrl.isBlank()) {
+            return R.fail("缺少 uploadUrl");
+        }
         UploadInfo info;
         try {
-            info = tusService.getUploadInfo(uploadId, String.valueOf(userId));
+            info = tusService.getUploadInfo(uploadUrl, String.valueOf(userId));
         } catch (IOException | TusException e) {
-            log.warn("tus upload not found or expired: id={}, error={}", uploadId, e.getMessage());
+            log.warn("tus upload not found or expired: url={}, error={}", uploadUrl, e.getMessage());
             return R.fail("上传会话不存在或已过期");
         }
-        log.info("tus upload complete callback: id={}, size={}, user={}",
-                uploadId, info.getLength(), userId);
-        completionDelegate.onComplete(info, tusService);
+        log.info("tus upload complete callback: url={}, size={}, user={}", uploadUrl, info.getLength(), userId);
+        completionDelegate.onComplete(info, tusService, uploadUrl, userId);
+        return R.ok();
+    }
+
+    /**
+     * 兼容旧路径（保留，供测试脚本使用）：{uploadId} 自动拼接完整 URL
+     */
+    @PostMapping("/{uploadId}/complete")
+    public R<Void> completeUploadLegacy(@PathVariable String uploadId) {
+        Long userId = LoginHelper.getUserId();
+        String owner = String.valueOf(userId);
+        UploadInfo info = null;
+        // 多形式尝试定位 tus 上传（owner 必须与创建时一致）
+        for (String candidate : new String[]{
+                "/api/upload/tus/" + uploadId,
+                "/api/upload/tus/" + uploadId + "/",
+                uploadId
+        }) {
+            try {
+                info = tusService.getUploadInfo(candidate, owner);
+                if (info != null) {
+                    log.info("[tus-debug] found via '{}'", candidate);
+                    break;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        if (info == null) {
+            log.warn("[tus-debug] NOT found. id={}, owner={}", uploadId, owner);
+            return R.fail("上传会话不存在或已过期");
+        }
+        completionDelegate.onComplete(info, tusService, "/api/upload/tus/" + uploadId, userId);
         return R.ok();
     }
 

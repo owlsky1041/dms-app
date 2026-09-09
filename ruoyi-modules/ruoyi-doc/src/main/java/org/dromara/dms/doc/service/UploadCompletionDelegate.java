@@ -26,8 +26,10 @@ public interface UploadCompletionDelegate {
     /**
      * 处理上传完成的业务逻辑
      *
-     * @param uploadInfo tus 上传元数据（含 metadata、length、ownerKey）
-     * @param service    tus 服务实例，用于读取上传字节 / 删除临时文件
+     * @param uploadInfo  tus 上传元数据（含 metadata、length）
+     * @param service     tus 服务实例，用于读取上传字节 / 删除临时文件
+     * @param uploadUrl   tus 上传完整 URI（/api/upload/tus/{id}）
+     * @param ownerUserId 后端登录用户 id（tus ownerKey = 真实登录 id）
      */
-    void onComplete(UploadInfo uploadInfo, TusFileUploadService service);
+    void onComplete(UploadInfo uploadInfo, TusFileUploadService service, String uploadUrl, Long ownerUserId);
 }

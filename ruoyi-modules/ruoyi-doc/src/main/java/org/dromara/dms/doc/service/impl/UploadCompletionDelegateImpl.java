@@ -8,7 +8,9 @@ import me.desair.tus.server.TusFileUploadService;
 import me.desair.tus.server.upload.UploadInfo;
 import org.dromara.dms.doc.config.MinIoConfig;
 import org.dromara.dms.doc.domain.DocFile;
+import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.mapper.DocFileMapper;
+import org.dromara.dms.doc.mapper.DocFolderMapper;
 import org.dromara.dms.doc.service.FileProcessor;
 import org.dromara.dms.doc.service.UploadCompletionDelegate;
 import org.springframework.stereotype.Service;
@@ -21,18 +23,16 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 上传完成回调实现（v1.0 简化版）
+ * 上传完成回调实现
  *
  * <p>流程：
  * <ol>
- *   <li>读取 tus 元数据（metadata 包含 userId/folderId/fileName/fileHash）</li>
- *   <li>读 tus 分块字节流</li>
- *   <li>计算 SHA-256（如客户端未传）</li>
- *   <li>查重（秒传）：若 file_hash 已存在，复用现有 doc_file 记录</li>
- *   <li>上传到 MinIO</li>
- *   <li>INSERT doc_file 记录</li>
- *   <li>触发 FileProcessor.processAsync()（异步生成缩略图/预览/文本）</li>
- *   <li>删除 tus 临时分块</li>
+ *   <li>读取 tus 元数据（folderId / fileName / relativePath 等）</li>
+ *   <li>若带 relativePath（文件夹上传），自动逐级创建/查找子文件夹</li>
+ *   <li>读 tus 分块字节流 → 计算 SHA-256</li>
+ *   <li>查重（秒传）</li>
+ *   <li>上传到 MinIO → INSERT doc_file</li>
+ *   <li>异步 FileProcessor（文本/预览）→ 删除 tus 临时文件</li>
  * </ol>
  *
  * @author DMS
@@ -45,35 +45,44 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
     private final MinioClient minioClient;
     private final MinIoConfig minIoConfig;
     private final DocFileMapper fileMapper;
+    private final DocFolderMapper folderMapper;
     private final FileProcessor fileProcessor;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void onComplete(UploadInfo uploadInfo, TusFileUploadService service) {
+    public void onComplete(UploadInfo uploadInfo, TusFileUploadService service, String uploadUrl, Long ownerUserId) {
         String uploadId = uploadInfo.getId().toString();
         Map<String, String> metadata = uploadInfo.getMetadata();
         String fileName = metadata.get("filename");
         String folderIdStr = metadata.get("folderId");
-        String userIdStr = metadata.get("userId");
-        String clientHash = metadata.get("fileHash");  // 客户端可选传 SHA-256（Web Crypto）
 
-        if (fileName == null || folderIdStr == null || userIdStr == null) {
-            log.error("Missing required metadata for upload {}: filename={}, folderId={}, userId={}",
-                    uploadId, fileName, folderIdStr, userIdStr);
-            throw new IllegalArgumentException("上传元数据缺失");
+        if (fileName == null || folderIdStr == null || ownerUserId == null) {
+            log.error("Missing required info for upload {}: filename={}, folderId={}, ownerUserId={}",
+                    uploadId, fileName, folderIdStr, ownerUserId);
+            throw new IllegalArgumentException("上传信息缺失");
         }
 
         Long folderId = Long.parseLong(folderIdStr);
-        Long userId = Long.parseLong(userIdStr);
+        // 上传者 = 后端登录用户（tus ownerKey），不信任前端 metadata.userId
+        Long userId = ownerUserId;
+        String ownerKey = String.valueOf(userId);
+        String tusUrl = uploadUrl;
         String fileExtension = extractExtension(fileName);
+
+        // 文件夹上传：按 relativePath（如 "设计图/施工图/a.pdf"）自动逐级建子文件夹
+        String relativePath = metadata.get("relativePath");
+        if (relativePath != null && !relativePath.isBlank()) {
+            String dirPart = relativePath.substring(0, Math.max(0, relativePath.lastIndexOf('/')));
+            if (!dirPart.isBlank()) {
+                folderId = ensureFolderChain(folderId, dirPart, userId);
+            }
+        }
 
         try {
             // 1. 秒传检查
-            String finalHash = clientHash;
-            if (finalHash == null) {
-                // 计算 SHA-256（注意必须传 ownerKey=userId，否则 tus 查不到上传）
-                finalHash = computeHash(service, uploadId, String.valueOf(userId));
-            }
+            String finalHash;
+            // 计算 SHA-256（ownerKey=真实登录 id，否则 UploadNotFound）
+            finalHash = computeHash(service, uploadUrl, ownerKey);
 
             DocFile existing = fileMapper.findByHash(finalHash);
             if (existing != null) {
@@ -81,7 +90,7 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
                 // 直接复用，复制引用到当前 folder
                 DocFile ref = cloneForFolder(existing, folderId, userId);
                 fileMapper.insert(ref);
-                service.deleteUpload(uploadId, String.valueOf(userId));
+                service.deleteUpload(uploadUrl, ownerKey);
                 return;
             }
 
@@ -89,7 +98,7 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
             String objectKey = String.format("files/%d/%d/%s-%s",
                     folderId, System.currentTimeMillis(), UUID.randomUUID(), sanitizeName(fileName));
 
-            try (InputStream is = service.getUploadedBytes(uploadId, String.valueOf(userId))) {
+            try (InputStream is = service.getUploadedBytes(uploadUrl, ownerKey)) {
                 minioClient.putObject(PutObjectArgs.builder()
                         .bucket(minIoConfig.getBucket())
                         .object(objectKey)
@@ -121,7 +130,7 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
 
             // 5. 清理 tus 临时文件
             try {
-                service.deleteUpload(uploadId, String.valueOf(userId));
+                service.deleteUpload(uploadUrl, ownerKey);
             } catch (Exception e) {
                 log.warn("Failed to delete tus upload {} (will be cleaned by expiration)", uploadId, e);
             }
@@ -137,8 +146,8 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
      *
      * @param ownerKey tus 上传隔离 key（=userId），读取上传字节必须传，否则 UploadNotFound
      */
-    private String computeHash(TusFileUploadService service, String uploadId, String ownerKey) {
-        try (InputStream is = service.getUploadedBytes(uploadId, ownerKey)) {
+    private String computeHash(TusFileUploadService service, String uploadUrl, String ownerKey) {
+        try (InputStream is = service.getUploadedBytes(uploadUrl, ownerKey)) {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] buf = new byte[8192];
             int n;
@@ -179,5 +188,54 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
 
     private String sanitizeName(String name) {
         return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    /**
+     * 按相对路径（如 "设计图/施工图"）从 baseFolderId 目录下逐级查找或创建子文件夹
+     *
+     * @return 最深层子文件夹 id；无段时返回 baseFolderId
+     */
+    private Long ensureFolderChain(Long baseFolderId, String dirPath, Long userId) {
+        String[] segments = dirPath.split("/");
+        DocFolder current = folderMapper.selectById(baseFolderId);
+        if (current == null) {
+            return baseFolderId;
+        }
+        Long parentId = current.getFolderId();
+        String parentPath = current.getFolderPath();
+
+        for (String seg : segments) {
+            if (seg == null || seg.isBlank()) continue;
+            DocFolder found = findFolder(parentId, seg);
+            if (found != null) {
+                parentId = found.getFolderId();
+                parentPath = found.getFolderPath();
+            } else {
+                DocFolder created = new DocFolder()
+                        .setParentId(parentId)
+                        .setFolderName(seg)
+                        // 物化路径：父路径 + 父id + "/"
+                        .setFolderPath(parentPath + parentId + "/")
+                        .setOwnerId(userId)
+                        .setSortOrder(0)
+                        .setCreateBy(userId)
+                        .setCreateTime(LocalDateTime.now());
+                folderMapper.insert(created);
+                log.info("Auto-created subfolder '{}' under parent={}", seg, parentId);
+                parentId = created.getFolderId();
+                parentPath = created.getFolderPath();
+            }
+        }
+        return parentId;
+    }
+
+    /** 在 parentId 下按名称查找未删除子文件夹 */
+    private DocFolder findFolder(Long parentId, String name) {
+        return folderMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<DocFolder>()
+                        .eq("parent_id", parentId)
+                        .eq("folder_name", name)
+                        .isNull("deleted_at")
+                        .last("LIMIT 1"));
     }
 }
