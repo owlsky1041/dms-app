@@ -59,6 +59,18 @@ public interface DocFolderMapper extends MPJBaseMapper<DocFolder> {
     int restore(@Param("folderId") Long folderId);
 
     /**
+     * 列出回收站文件夹（软删除的）
+     */
+    @Select("SELECT * FROM doc_folder WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC")
+    List<DocFolder> listDeletedFolders();
+
+    /**
+     * 物理删除文件夹（连同其物化路径子树）
+     */
+    @Select("SELECT folder_id FROM doc_folder WHERE folder_path LIKE CONCAT(#{pathPrefix}, '%') OR folder_id = #{folderId}")
+    List<Long> listSubtreeIds(@Param("folderId") Long folderId, @Param("pathPrefix") String pathPrefix);
+
+    /**
      * 物理删除
      */
     @Update("DELETE FROM doc_folder WHERE folder_id = #{folderId}")

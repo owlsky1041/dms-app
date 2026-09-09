@@ -84,6 +84,12 @@ public interface DocFileMapper extends MPJBaseMapper<DocFile> {
     DocFile findByHash(@Param("hash") String hash);
 
     /**
+     * 列出回收站文件（软删除的）
+     */
+    @Select("SELECT * FROM doc_file WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC")
+    List<DocFile> listDeleted();
+
+    /**
      * 全文搜索（文件名 ILIKE + 提取文本 ILIKE，支持中英文；pg_trgm 索引加速前缀/模糊）
      */
     @Select(value = "SELECT f.* FROM doc_file f " +
