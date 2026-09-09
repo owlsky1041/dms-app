@@ -12,7 +12,7 @@ import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.dto.BatchMoveRequest;
 import org.dromara.dms.doc.service.FileService;
-import org.dromara.dms.doc.service.PermissionChecker;
+import org.dromara.dms.doc.service.PermissionService;
 import org.dromara.dms.doc.enums.PermissionFlag;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,7 +30,7 @@ import java.io.IOException;
 public class FileController {
 
     private final FileService fileService;
-    private final PermissionChecker permissionChecker;
+    private final PermissionService permissionService;
 
     /**
      * 列出文件夹下文件（分页）
@@ -155,13 +155,13 @@ public class FileController {
     }
 
     /**
-     * 权限检查辅助
+     * 权限检查辅助：无权限时抛异常（superadmin/文件创建者豁免，否则须 flags 含要求位）
      */
     private void checkPerm(Long fileId, Long userId, PermissionFlag flag) {
-        // v1.0 简化：所有登录用户暂时都能操作，后续接入 PermissionChecker
-        // TODO: var roleIds = LoginHelper.getRoleIds(); var deptIds = LoginHelper.getDeptIds();
-        //       if (!permissionChecker.hasFilePermission(userId, roleIds, deptIds, fileId, flag)) {
-        //           throw new ServiceException("无权限");
-        //       }
+        if (LoginHelper.isSuperAdmin()) return;
+        int flags = permissionService.computeUserFlags("file", fileId, userId);
+        if (!PermissionFlag.has(flags, flag)) {
+            throw new org.dromara.common.core.exception.ServiceException("无" + flag.getDescription() + "权限");
+        }
     }
 }
