@@ -35,7 +35,10 @@ public interface DocFileMapper extends MPJBaseMapper<DocFile> {
     /**
      * 分页列出文件夹下文件
      */
-    @Select("SELECT * FROM doc_file WHERE folder_id = #{folderId} AND deleted_at IS NULL ORDER BY create_time DESC LIMIT #{page.size} OFFSET #{page.current}")
+    /**
+     * 分页列出文件夹下文件（分页由 MyBatis-Plus 插件处理，不手写 LIMIT/OFFSET）
+     */
+    @Select("SELECT * FROM doc_file WHERE folder_id = #{folderId} AND deleted_at IS NULL ORDER BY create_time DESC")
     IPage<DocFile> pageByFolder(Page<DocFile> page, @Param("folderId") Long folderId);
 
     /**
