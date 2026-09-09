@@ -48,16 +48,28 @@ public class UploadCallbackController {
         if (uploadUrl == null || uploadUrl.isBlank()) {
             return R.fail("缺少 uploadUrl");
         }
-        UploadInfo info;
-        try {
-            info = tusService.getUploadInfo(uploadUrl, String.valueOf(userId));
-        } catch (IOException | TusException e) {
-            log.warn("tus upload not found or expired: url={}, error={}", uploadUrl, e.getMessage());
+        String owner = String.valueOf(userId);
+        UploadInfo info = null;
+        for (String candidate : new String[]{uploadUrl, uploadUrl + "/", extractId(uploadUrl)}) {
+            try {
+                info = tusService.getUploadInfo(candidate, owner);
+                if (info != null) break;
+            } catch (Exception ignored) {
+            }
+        }
+        if (info == null) {
+            log.warn("tus upload not found: url={}", uploadUrl);
             return R.fail("上传会话不存在或已过期");
         }
-        log.info("tus upload complete callback: url={}, size={}, user={}", uploadUrl, info.getLength(), userId);
-        completionDelegate.onComplete(info, tusService, uploadUrl, userId);
+        log.info("tus upload complete: url={}, size={}, user={}", uploadUrl, info.getLength(), userId);
+        completionDelegate.onComplete(info, tusService, "/api/upload/tus/" + info.getId(), userId);
         return R.ok();
+    }
+
+    private String extractId(String url) {
+        if (url == null) return url;
+        int i = url.lastIndexOf('/');
+        return i >= 0 ? url.substring(i + 1) : url;
     }
 
     /**
