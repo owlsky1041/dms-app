@@ -3,6 +3,7 @@ package org.dromara.dms.doc.controller;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.domain.R;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.dto.CreateFolderRequest;
@@ -36,12 +37,24 @@ public class FolderController {
         return R.ok(folderService.listChildren(parentId, userId));
     }
 
-    /** 创建文件夹（需父文件夹「创建子项」权限） */
+    /**
+     * 创建文件夹
+     *
+     * <p>顶层（parentId=0）即公司文档区，<b>仅超级管理员可创建</b>；
+     * 文档区内建子目录需父文件夹「创建子项」权限。
+     */
     @PostMapping
     public R<DocFolder> create(@RequestBody CreateFolderRequest req) {
         Long userId = LoginHelper.getUserId();
-        permissionService.requireFolder(req.getParentId(), PermissionFlag.CREATE_CHILD, userId);
-        return R.ok(folderService.create(req.getParentId(), req.getName(), userId));
+        Long parentId = req.getParentId();
+        if (parentId == null || parentId == 0L) {
+            if (!LoginHelper.isSuperAdmin()) {
+                throw new ServiceException("仅超级管理员可创建顶层文档区");
+            }
+        } else {
+            permissionService.requireFolder(parentId, PermissionFlag.CREATE_CHILD, userId);
+        }
+        return R.ok(folderService.create(parentId, req.getName(), userId));
     }
 
     /** 重命名（需「编辑」权限） */
@@ -53,13 +66,20 @@ public class FolderController {
         return R.ok();
     }
 
-    /** 移动（源需「编辑」权限，目标父文件夹需「创建子项」权限） */
+    /** 移动（源需「编辑」权限，目标需「创建子项」权限；移动到顶层仅超级管理员） */
     @PutMapping("/{folderId}/move")
     public R<Void> move(@PathVariable Long folderId, @RequestBody MoveFolderRequest req) {
         Long userId = LoginHelper.getUserId();
         permissionService.requireFolder(folderId, PermissionFlag.EDIT, userId);
-        permissionService.requireFolder(req.getNewParentId(), PermissionFlag.CREATE_CHILD, userId);
-        folderService.move(folderId, req.getNewParentId(), userId);
+        Long newParentId = req.getNewParentId();
+        if (newParentId == null || newParentId == 0L) {
+            if (!LoginHelper.isSuperAdmin()) {
+                throw new ServiceException("仅超级管理员可调整顶层文档区");
+            }
+        } else {
+            permissionService.requireFolder(newParentId, PermissionFlag.CREATE_CHILD, userId);
+        }
+        folderService.move(folderId, newParentId, userId);
         return R.ok();
     }
 

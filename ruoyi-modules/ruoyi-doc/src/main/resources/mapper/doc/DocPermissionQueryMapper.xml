@@ -74,14 +74,16 @@
 
     <!--
       文件可见条件（文件固定别名 f）：
-      - 本人上传（creator_id），或
-      - 所在文件夹在可见集合内（继承父文件夹权限），或
+      - 所在文件夹在可见集合内（继承文档区权限），或
       - 文件本身存在命中授权
+
+      注意：上传者身份不再自动带来可见性。上传者只获得「编辑」权（见 computeFileFlags），
+      可见性一律来自文档区/文件授权，保证列表与单资源校验口径一致
+      （否则会出现「列表看得到、点开 403」）。
      -->
     <sql id="fileVisible">
         (
-            f.creator_id = #{userId}
-            OR f.folder_id IN
+            f.folder_id IN
                 <foreach collection="readableFolderIds" item="fid" open="(" separator="," close=")">#{fid}</foreach>
             OR EXISTS (
                 SELECT 1 FROM doc_file_permission fp

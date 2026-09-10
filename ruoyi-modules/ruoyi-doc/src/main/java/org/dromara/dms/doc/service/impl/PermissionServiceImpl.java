@@ -206,23 +206,24 @@ public class PermissionServiceImpl implements PermissionService {
 
     /**
      * 计算文件夹权限（含父链继承）
+     *
+     * <p>所有者规则：<b>文档区所有者对其下整棵子树拥有完全控制</b>。
+     * 判定时沿父链向上查找，链上任一文件夹的 owner_id 命中即返回 255
+     * （新文件夹的 owner_id 会继承所属文档区所有者，见 FolderServiceImpl#resolveOwner）。
      */
     private int computeFolderFlags(Long folderId, Long userId,
                                    Collection<Long> roleIds, Collection<Long> deptIds) {
-        // 所有者完全控制
-        var folder = folderMapper.selectById(folderId);
-        if (folder != null && userId.equals(folder.getOwnerId())) {
-            return 255;
-        }
-        // 直接权限 + 父链继承
         int flags = 0;
         Long cur = folderId;
         Set<Long> visited = new HashSet<>();
         while (cur != null && cur != 0 && visited.add(cur)) {
-            flags |= folderPermMapper.sumFlags(cur, userId, roleIds, deptIds);
-            // 若父层无 inherit 传播则停 —— 简化：始终向上并集
             var f = folderMapper.selectById(cur);
             if (f == null) break;
+            // 文档区所有者（含继承下来的归属）→ 完全控制
+            if (userId.equals(f.getOwnerId())) {
+                return PermissionFlag.FULL;
+            }
+            flags |= folderPermMapper.sumFlags(cur, userId, roleIds, deptIds);
             cur = f.getParentId();
         }
         return flags;
@@ -230,14 +231,19 @@ public class PermissionServiceImpl implements PermissionService {
 
     /**
      * 计算文件权限（直接权限 + 所在文件夹继承）
+     *
+     * <p>上传者规则：<b>上传者仅获得「编辑」权限</b>，完全控制权归文档区所有者
+     * （通过所在文件夹链上的 owner_id 得到 255）。上传者不能删除、不能改权限。
      */
     private int computeFileFlags(Long fileId, Long userId,
                                  Collection<Long> roleIds, Collection<Long> deptIds) {
         var file = fileMapper.selectById(fileId);
+        int flags = 0;
+        // 上传者：仅编辑权（不含删除/完全控制）
         if (file != null && userId.equals(file.getCreatorId())) {
-            return 255;
+            flags |= PermissionFlag.EDIT.getCode();
         }
-        int flags = filePermMapper.sumFlags(fileId, userId, roleIds, deptIds);
+        flags |= filePermMapper.sumFlags(fileId, userId, roleIds, deptIds);
         if (file != null && file.getFolderId() != null) {
             flags |= computeFolderFlags(file.getFolderId(), userId, roleIds, deptIds);
         }

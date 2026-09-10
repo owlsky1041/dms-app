@@ -14,6 +14,7 @@ import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
 import org.dromara.dms.doc.enums.PermissionFlag;
 import org.dromara.dms.doc.service.FileProcessor;
+import org.dromara.dms.doc.service.DocFolderOwnerResolver;
 import org.dromara.dms.doc.service.InstantUploadService;
 import org.dromara.dms.doc.service.PermissionService;
 import org.dromara.dms.doc.service.UploadCompletionDelegate;
@@ -53,6 +54,7 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
     private final FileProcessor fileProcessor;
     private final InstantUploadService instantUploadService;
     private final PermissionService permissionService;
+    private final DocFolderOwnerResolver ownerResolver;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -212,7 +214,8 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
                         .setFolderName(seg)
                         // 物化路径：父路径 + 父id + "/"
                         .setFolderPath(parentPath + parentId + "/")
-                        .setOwnerId(userId)
+                        // 所有者继承文档区所有者（与手动建目录保持一致）
+                        .setOwnerId(ownerResolver.resolveOwner(parentId, userId))
                         .setSortOrder(0)
                         .setCreateBy(userId)
                         .setCreateTime(LocalDateTime.now());

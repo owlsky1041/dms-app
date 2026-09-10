@@ -28,21 +28,26 @@ public class PermissionController {
 
     private final PermissionService permissionService;
 
+    // 注意：授权/撤销/查看授权清单都要求对目标资源具备「完全控制」位（128）。
+    // 否则会出现权限提升：上传者只拿到编辑权，却可以直接给自己授完全控制。
+
     /**
-     * 查看文件夹已授权列表
+     * 查看文件夹已授权列表（需完全控制）
      */
     @GetMapping("/folders/{folderId}")
     public R<List<DocFolderPermission>> listFolderPerms(@PathVariable Long folderId) {
         Long userId = LoginHelper.getUserId();
+        permissionService.requireFolder(folderId, PermissionFlag.FULL_CONTROL, userId);
         return R.ok(permissionService.listFolderPermissions(folderId, userId));
     }
 
     /**
-     * 文件夹授权
+     * 文件夹授权（需完全控制）
      */
     @PostMapping("/folders/{folderId}/grant")
     public R<Void> grantFolder(@PathVariable Long folderId, @RequestBody GrantPermissionRequest req) {
         Long userId = LoginHelper.getUserId();
+        permissionService.requireFolder(folderId, PermissionFlag.FULL_CONTROL, userId);
         req.setResourceType("folder");
         req.setResourceId(folderId);
         permissionService.grant(req, userId);
@@ -50,32 +55,35 @@ public class PermissionController {
     }
 
     /**
-     * 撤销文件夹权限
+     * 撤销文件夹权限（需完全控制）
      */
     @DeleteMapping("/folders/{folderId}/revoke")
     public R<Void> revokeFolder(@PathVariable Long folderId,
                                 @RequestParam String subjectType,
                                 @RequestParam Long subjectId) {
         Long userId = LoginHelper.getUserId();
+        permissionService.requireFolder(folderId, PermissionFlag.FULL_CONTROL, userId);
         permissionService.revoke("folder", folderId, subjectType, subjectId, userId);
         return R.ok();
     }
 
     /**
-     * 查看文件已授权列表
+     * 查看文件已授权列表（需完全控制）
      */
     @GetMapping("/files/{fileId}")
     public R<List<DocFilePermission>> listFilePerms(@PathVariable Long fileId) {
         Long userId = LoginHelper.getUserId();
+        permissionService.requireFile(fileId, PermissionFlag.FULL_CONTROL, userId);
         return R.ok(permissionService.listFilePermissions(fileId, userId));
     }
 
     /**
-     * 文件授权
+     * 文件授权（需完全控制）
      */
     @PostMapping("/files/{fileId}/grant")
     public R<Void> grantFile(@PathVariable Long fileId, @RequestBody GrantPermissionRequest req) {
         Long userId = LoginHelper.getUserId();
+        permissionService.requireFile(fileId, PermissionFlag.FULL_CONTROL, userId);
         req.setResourceType("file");
         req.setResourceId(fileId);
         permissionService.grant(req, userId);
@@ -83,13 +91,14 @@ public class PermissionController {
     }
 
     /**
-     * 撤销文件权限
+     * 撤销文件权限（需完全控制）
      */
     @DeleteMapping("/files/{fileId}/revoke")
     public R<Void> revokeFile(@PathVariable Long fileId,
                               @RequestParam String subjectType,
                               @RequestParam Long subjectId) {
         Long userId = LoginHelper.getUserId();
+        permissionService.requireFile(fileId, PermissionFlag.FULL_CONTROL, userId);
         permissionService.revoke("file", fileId, subjectType, subjectId, userId);
         return R.ok();
     }

@@ -7,6 +7,7 @@ import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
 import org.dromara.dms.doc.mapper.DocFolderPermissionMapper;
 import org.dromara.dms.doc.mapper.DocPermissionQueryMapper;
+import org.dromara.dms.doc.service.DocFolderOwnerResolver;
 import org.dromara.dms.doc.service.FolderService;
 import org.dromara.dms.doc.service.PermissionChecker;
 import org.dromara.dms.doc.service.PermissionScopeResolver;
@@ -32,6 +33,7 @@ public class FolderServiceImpl implements FolderService {
     private final DocFolderPermissionMapper folderPermMapper;
     private final PermissionChecker permissionChecker;
     private final DocPermissionQueryMapper permQueryMapper;
+    private final DocFolderOwnerResolver ownerResolver;
     private final PermissionScopeResolver scopeResolver;
     private final DocFileMapper fileMapper;
 
@@ -57,7 +59,8 @@ public class FolderServiceImpl implements FolderService {
                 .setParentId(parentId)
                 .setFolderName(name)
                 .setFolderPath(buildPath(parent, parentId, userId))
-                .setOwnerId(userId)
+                // 所有者继承文档区所有者（完全控制归文档区所有者），创建者另记 create_by
+                .setOwnerId(ownerResolver.resolveOwner(parentId, userId))
                 .setSortOrder(0)
                 .setCreateBy(userId)
                 .setCreateTime(LocalDateTime.now());
