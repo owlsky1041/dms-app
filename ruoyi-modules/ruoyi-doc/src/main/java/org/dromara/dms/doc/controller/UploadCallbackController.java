@@ -9,7 +9,9 @@ import me.desair.tus.server.upload.UploadInfo;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.domain.DocFile;
+import org.dromara.dms.doc.enums.PermissionFlag;
 import org.dromara.dms.doc.service.InstantUploadService;
+import org.dromara.dms.doc.service.PermissionService;
 import org.dromara.dms.doc.service.UploadCompletionDelegate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,6 +41,7 @@ public class UploadCallbackController {
     private final TusFileUploadService tusService;
     private final UploadCompletionDelegate completionDelegate;
     private final InstantUploadService instantUploadService;
+    private final PermissionService permissionService;
 
     /**
      * tus 完成回调（业务处理）—— 前端主入口
@@ -152,6 +155,8 @@ public class UploadCallbackController {
             return R.fail("该文件未命中秒传，请走正常上传");
         }
         Long folderId = Long.parseLong(folderIdStr);
+        // 秒传引用等价于在目标文件夹上传一个文件
+        permissionService.requireFolder(folderId, PermissionFlag.UPLOAD, userId);
         DocFile ref = instantUploadService.createReference(existing, folderId, userId, body.get("fileName"));
         log.info("Instant upload hit: user={}, folder={}, hash={}, newFileId={}",
                 userId, folderId, hash, ref.getFileId());

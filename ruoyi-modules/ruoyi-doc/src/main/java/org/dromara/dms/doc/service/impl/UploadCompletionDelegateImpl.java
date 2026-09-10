@@ -11,8 +11,10 @@ import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
+import org.dromara.dms.doc.enums.PermissionFlag;
 import org.dromara.dms.doc.service.FileProcessor;
 import org.dromara.dms.doc.service.InstantUploadService;
+import org.dromara.dms.doc.service.PermissionService;
 import org.dromara.dms.doc.service.UploadCompletionDelegate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +51,7 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
     private final DocFolderMapper folderMapper;
     private final FileProcessor fileProcessor;
     private final InstantUploadService instantUploadService;
+    private final PermissionService permissionService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -71,11 +74,16 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
         String tusUrl = uploadUrl;
         String fileExtension = extractExtension(fileName);
 
+        // 落库前最终权限校验（tus 建会话时已校验一次，此处覆盖文件夹上传等路径）
+        permissionService.requireFolder(folderId, PermissionFlag.UPLOAD, userId);
+
         // 文件夹上传：按 relativePath（如 "设计图/施工图/a.pdf"）自动逐级建子文件夹
         String relativePath = metadata.get("relativePath");
         if (relativePath != null && !relativePath.isBlank()) {
             String dirPart = relativePath.substring(0, Math.max(0, relativePath.lastIndexOf('/')));
             if (!dirPart.isBlank()) {
+                // 自动创建子文件夹属「创建子项」语义，需额外具备该权限位
+                permissionService.requireFolder(folderId, PermissionFlag.CREATE_CHILD, userId);
                 folderId = ensureFolderChain(folderId, dirPart, userId);
             }
         }

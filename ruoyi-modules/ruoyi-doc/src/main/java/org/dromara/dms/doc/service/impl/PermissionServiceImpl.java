@@ -7,6 +7,8 @@ import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.domain.DocFilePermission;
 import org.dromara.dms.doc.domain.DocFolderPermission;
 import org.dromara.dms.doc.dto.GrantPermissionRequest;
+import org.dromara.common.core.exception.ServiceException;
+import org.dromara.dms.doc.enums.PermissionFlag;
 import org.dromara.dms.doc.enums.SubjectType;
 import org.dromara.dms.doc.mapper.DocFilePermissionMapper;
 import org.dromara.dms.doc.mapper.DocFolderPermissionMapper;
@@ -154,6 +156,50 @@ public class PermissionServiceImpl implements PermissionService {
             return computeFileFlags(resourceId, userId, roleIds, deptIds);
         }
         throw new IllegalArgumentException("resourceType 必须是 folder 或 file");
+    }
+
+    // ================= 统一校验入口 =================
+
+    @Override
+    public void requireFile(Long fileId, PermissionFlag flag, Long userId) {
+        if (LoginHelper.isSuperAdmin()) return;
+        int flags = computeUserFlags("file", fileId, userId);
+        if (!PermissionFlag.has(flags, flag)) {
+            throw new ServiceException("无" + flag.getDescription() + "权限");
+        }
+    }
+
+    @Override
+    public void requireFolder(Long folderId, PermissionFlag flag, Long userId) {
+        // 根层级（0/null）无父资源可校验；新建的资源归创建者所有
+        if (folderId == null || folderId == 0L) return;
+        if (LoginHelper.isSuperAdmin()) return;
+        int flags = computeUserFlags("folder", folderId, userId);
+        if (!PermissionFlag.has(flags, flag)) {
+            throw new ServiceException("无" + flag.getDescription() + "权限");
+        }
+    }
+
+    @Override
+    public void requireFolders(Collection<Long> folderIds, PermissionFlag flag, Long userId) {
+        if (folderIds == null || folderIds.isEmpty()) return;
+        if (LoginHelper.isSuperAdmin()) return;
+        for (Long id : folderIds) {
+            requireFolder(id, flag, userId);
+        }
+    }
+
+    @Override
+    public boolean hasFile(Long fileId, PermissionFlag flag, Long userId) {
+        if (LoginHelper.isSuperAdmin()) return true;
+        return PermissionFlag.has(computeUserFlags("file", fileId, userId), flag);
+    }
+
+    @Override
+    public boolean hasFolder(Long folderId, PermissionFlag flag, Long userId) {
+        if (folderId == null || folderId == 0L) return true;
+        if (LoginHelper.isSuperAdmin()) return true;
+        return PermissionFlag.has(computeUserFlags("folder", folderId, userId), flag);
     }
 
     // ================= 内部方法 =================

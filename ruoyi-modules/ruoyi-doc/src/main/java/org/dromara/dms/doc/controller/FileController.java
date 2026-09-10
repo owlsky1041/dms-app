@@ -72,6 +72,7 @@ public class FileController {
     public R<Void> move(@PathVariable Long fileId, @RequestParam Long targetFolderId) {
         Long userId = LoginHelper.getUserId();
         checkPerm(fileId, userId, PermissionFlag.EDIT);
+        permissionService.requireFolder(targetFolderId, PermissionFlag.UPLOAD, userId);
         fileService.move(fileId, targetFolderId, userId);
         return R.ok();
     }
@@ -83,6 +84,7 @@ public class FileController {
     public R<Long> copy(@PathVariable Long fileId, @RequestParam Long targetFolderId) {
         Long userId = LoginHelper.getUserId();
         checkPerm(fileId, userId, PermissionFlag.VISIBLE);
+        permissionService.requireFolder(targetFolderId, PermissionFlag.UPLOAD, userId);
         Long newId = fileService.copy(fileId, targetFolderId, userId);
         return R.ok(newId);
     }
@@ -98,6 +100,7 @@ public class FileController {
                 checkPerm(id, userId, PermissionFlag.EDIT);
             }
         }
+        permissionService.requireFolder(req.getTargetFolderId(), PermissionFlag.UPLOAD, userId);
         fileService.moveBatch(req.getFileIds(), req.getTargetFolderId(), userId);
         return R.ok();
     }
@@ -168,10 +171,7 @@ public class FileController {
      * 权限检查辅助：无权限时抛异常（superadmin/文件创建者豁免，否则须 flags 含要求位）
      */
     private void checkPerm(Long fileId, Long userId, PermissionFlag flag) {
-        if (LoginHelper.isSuperAdmin()) return;
-        int flags = permissionService.computeUserFlags("file", fileId, userId);
-        if (!PermissionFlag.has(flags, flag)) {
-            throw new org.dromara.common.core.exception.ServiceException("无" + flag.getDescription() + "权限");
-        }
+        // 统一走 PermissionService（超管/所有者豁免逻辑集中在一处）
+        permissionService.requireFile(fileId, flag, userId);
     }
 }
