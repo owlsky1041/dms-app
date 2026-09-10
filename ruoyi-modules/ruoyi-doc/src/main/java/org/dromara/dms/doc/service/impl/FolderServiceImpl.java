@@ -208,35 +208,6 @@ public class FolderServiceImpl implements FolderService {
                 .toList();
     }
 
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public DocFolder getOrCreateUserRoot(Long userId) {
-        // 简化：用 folder_path = '/0/' AND owner_id = userId 查找
-        // v1.0 简化版：直接 SELECT 后不存在则创建
-        // 实际实现可用 LambdaQueryWrapper
-        DocFolder root = folderMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<DocFolder>()
-                        .eq("owner_id", userId)
-                        .eq("parent_id", 0)
-                        .eq("folder_name", "我的文档")
-                        .isNull("deleted_at")
-                        .last("LIMIT 1")
-        );
-
-        if (root != null) return root;
-
-        DocFolder folder = new DocFolder()
-                .setParentId(0L)
-                .setFolderName("我的文档")
-                .setFolderPath("/0/")
-                .setOwnerId(userId)
-                .setSortOrder(0)
-                .setCreateBy(userId)
-                .setCreateTime(LocalDateTime.now());
-        folderMapper.insert(folder);
-        log.info("Created user root folder: user={}, folder={}", userId, folder.getFolderId());
-        return folder;
-    }
 
     /**
      * 构建新文件夹的物化路径

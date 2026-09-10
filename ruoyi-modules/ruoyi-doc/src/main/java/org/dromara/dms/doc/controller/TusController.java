@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.desair.tus.server.TusFileUploadService;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.enums.PermissionFlag;
 import org.dromara.dms.doc.service.PermissionService;
@@ -55,12 +56,16 @@ public class TusController {
         if ("POST".equalsIgnoreCase(request.getMethod())) {
             String folderIdStr = parseMetadata(request.getHeader("Upload-Metadata")).get("folderId");
             if (folderIdStr != null && !folderIdStr.isBlank()) {
+                long folderId;
                 try {
-                    permissionService.requireFolder(Long.parseLong(folderIdStr.trim()),
-                            PermissionFlag.UPLOAD, userId);
+                    folderId = Long.parseLong(folderIdStr.trim());
                 } catch (NumberFormatException e) {
                     throw new IllegalArgumentException("folderId 非法: " + folderIdStr);
                 }
+                if (folderId == 0L) {
+                    throw new ServiceException("请在具体文件夹内上传文件（当前为文档根目录）");
+                }
+                permissionService.requireFolder(folderId, PermissionFlag.UPLOAD, userId);
             }
         }
 

@@ -155,6 +155,9 @@ public class UploadCallbackController {
             return R.fail("该文件未命中秒传，请走正常上传");
         }
         Long folderId = Long.parseLong(folderIdStr);
+        if (folderId == 0L) {
+            return R.fail("请在具体文件夹内上传文件（当前为文档根目录）");
+        }
         // 秒传引用等价于在目标文件夹上传一个文件
         permissionService.requireFolder(folderId, PermissionFlag.UPLOAD, userId);
         DocFile ref = instantUploadService.createReference(existing, folderId, userId, body.get("fileName"));

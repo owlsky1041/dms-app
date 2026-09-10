@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import me.desair.tus.server.TusFileUploadService;
 import me.desair.tus.server.upload.UploadInfo;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.dms.doc.config.MinIoConfig;
 import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.domain.DocFolder;
@@ -68,6 +69,9 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
         }
 
         Long folderId = Long.parseLong(folderIdStr);
+        if (folderId == 0L) {
+            throw new ServiceException("请在具体文件夹内上传文件（当前为文档根目录）");
+        }
         // 上传者 = 后端登录用户（tus ownerKey），不信任前端 metadata.userId
         Long userId = ownerUserId;
         String ownerKey = String.valueOf(userId);

@@ -55,8 +55,4 @@ public interface FolderService {
      */
     List<DocFolder> getBreadcrumb(Long folderId);
 
-    /**
-     * 获取用户根文件夹
-     */
-    DocFolder getOrCreateUserRoot(Long userId);
 }

@@ -28,12 +28,6 @@ public class FolderController {
     private final FolderService folderService;
     private final PermissionService permissionService;
 
-    /** 获取当前用户的根文件夹 */
-    @GetMapping("/root")
-    public R<DocFolder> getRoot() {
-        Long userId = LoginHelper.getUserId();
-        return R.ok(folderService.getOrCreateUserRoot(userId));
-    }
 
     /** 列子文件夹 */
     @GetMapping("/children")
