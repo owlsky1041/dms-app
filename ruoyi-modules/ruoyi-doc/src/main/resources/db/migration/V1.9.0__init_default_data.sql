@@ -16,7 +16,7 @@ ON CONFLICT (menu_id) DO NOTHING;
 INSERT INTO sys_menu (menu_id, menu_name, parent_id, order_num, path, component, query_param, is_frame, is_cache, menu_type, visible, status, perms, icon, active_menu, ext, create_dept, create_by, create_time, update_by, update_time, remark)
 -- 说明：不设「我的文档」个人空间，全公司共用一套文档库（顶层为公司各文档区）
 VALUES (2010, '全部文档', 2000, 1, 'all', 'doc/all/index', null, 'N', 'Y', 'C', '0', '0', 'doc:all:list', 'folder', '', '', 103, 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, '公司全部文档（顶层入口）'),
-       (2020, '部门资料', 2000, 2, 'library', 'doc/library/index', null, 'N', 'Y', 'C', '0', '0', 'doc:library:list', 'folder', '', '', 103, 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, '部门资料（仅名称，非按部门拆分文档库）'),
+       (2020, '部门文档', 2000, 2, 'library', 'doc/library/index', null, 'N', 'Y', 'C', '0', '0', 'doc:library:list', 'folder', '', '', 103, 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, '部门文档（固定名称，目录可改名；非按部门拆分文档库）'),
        (2040, '回收站',   2000, 4, 'recycle', 'doc/recycle/index', null, 'N', 'Y', 'C', '0', '0', 'doc:recycle:list', 'delete', '', '', 103, 1, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, '回收站')
 ON CONFLICT (menu_id) DO NOTHING;
 
