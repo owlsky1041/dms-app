@@ -8,6 +8,8 @@ import me.desair.tus.server.exception.TusException;
 import me.desair.tus.server.upload.UploadInfo;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.satoken.utils.LoginHelper;
+import org.dromara.dms.doc.domain.DocFile;
+import org.dromara.dms.doc.service.InstantUploadService;
 import org.dromara.dms.doc.service.UploadCompletionDelegate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -35,6 +38,7 @@ public class UploadCallbackController {
 
     private final TusFileUploadService tusService;
     private final UploadCompletionDelegate completionDelegate;
+    private final InstantUploadService instantUploadService;
 
     /**
      * tus 完成回调（业务处理）—— 前端主入口
@@ -101,6 +105,61 @@ public class UploadCallbackController {
         }
         completionDelegate.onComplete(info, tusService, "/api/upload/tus/" + uploadId, userId);
         return R.ok();
+    }
+
+    /**
+     * 秒传检查（设计文档 API：POST /api/upload/check-hash）
+     *
+     * <p>前端在分块上传前用浏览器算出 SHA-256 调此接口；命中则无需上传字节，
+     * 直接调 {@code POST /api/upload/instant} 建引用。
+     *
+     * @param body 含 hash（SHA-256，小写十六进制）
+     * @return { exists, fileId, fileName, fileSize }
+     */
+    @PostMapping("/check-hash")
+    public R<Map<String, Object>> checkHash(@RequestBody Map<String, String> body) {
+        String hash = body.get("hash");
+        if (hash == null || hash.isBlank()) {
+            return R.fail("缺少 hash");
+        }
+        DocFile existing = instantUploadService.findByHash(hash);
+        Map<String, Object> data = new HashMap<>();
+        data.put("exists", existing != null);
+        if (existing != null) {
+            data.put("fileId", existing.getFileId());
+            data.put("fileName", existing.getFileName());
+            data.put("fileSize", existing.getFileSize());
+        }
+        return R.ok(data);
+    }
+
+    /**
+     * 秒传引用：SHA-256 命中时直接在目标文件夹建引用，不传输字节
+     *
+     * @param body 含 hash、fileName、folderId
+     * @return { fileId, instant: true }
+     */
+    @PostMapping("/instant")
+    public R<Map<String, Object>> instant(@RequestBody Map<String, String> body) {
+        Long userId = LoginHelper.getUserId();
+        String hash = body.get("hash");
+        String folderIdStr = body.get("folderId");
+        if (hash == null || hash.isBlank() || folderIdStr == null || folderIdStr.isBlank()) {
+            return R.fail("缺少 hash 或 folderId");
+        }
+        DocFile existing = instantUploadService.findByHash(hash);
+        if (existing == null) {
+            return R.fail("该文件未命中秒传，请走正常上传");
+        }
+        Long folderId = Long.parseLong(folderIdStr);
+        DocFile ref = instantUploadService.createReference(existing, folderId, userId, body.get("fileName"));
+        log.info("Instant upload hit: user={}, folder={}, hash={}, newFileId={}",
+                userId, folderId, hash, ref.getFileId());
+        Map<String, Object> data = new HashMap<>();
+        data.put("fileId", ref.getFileId());
+        data.put("fileName", ref.getFileName());
+        data.put("instant", true);
+        return R.ok(data);
     }
 
     /**

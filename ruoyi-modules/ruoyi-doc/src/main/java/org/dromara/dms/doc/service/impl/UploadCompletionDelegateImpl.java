@@ -12,6 +12,7 @@ import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
 import org.dromara.dms.doc.service.FileProcessor;
+import org.dromara.dms.doc.service.InstantUploadService;
 import org.dromara.dms.doc.service.UploadCompletionDelegate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +48,7 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
     private final DocFileMapper fileMapper;
     private final DocFolderMapper folderMapper;
     private final FileProcessor fileProcessor;
+    private final InstantUploadService instantUploadService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -87,9 +89,8 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
             DocFile existing = fileMapper.findByHash(finalHash);
             if (existing != null) {
                 log.info("Instant upload: file already exists, hash={}, existingId={}", finalHash, existing.getFileId());
-                // 直接复用，复制引用到当前 folder
-                DocFile ref = cloneForFolder(existing, folderId, userId);
-                fileMapper.insert(ref);
+                // 直接引用（与 /api/upload/instant 走同一实现），不重复上传 MinIO 对象
+                instantUploadService.createReference(existing, folderId, userId, fileName);
                 service.deleteUpload(uploadUrl, ownerKey);
                 return;
             }
@@ -163,23 +164,6 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
         }
     }
 
-    private DocFile cloneForFolder(DocFile src, Long newFolderId, Long userId) {
-        return new DocFile()
-                .setFolderId(newFolderId)
-                .setFileName(src.getFileName())
-                .setFileExtension(src.getFileExtension())
-                .setFileSize(src.getFileSize())
-                .setFileHash(src.getFileHash())
-                .setMimeType(src.getMimeType())
-                .setStorageBackend(src.getStorageBackend())
-                .setStorageBucket(src.getStorageBucket())
-                .setStorageKey(src.getStorageKey())
-                .setPreviewKey(src.getPreviewKey())
-                .setThumbnailKey(src.getThumbnailKey())
-                .setPageCount(src.getPageCount())
-                .setCreatorId(userId)
-                .setCreateTime(LocalDateTime.now());
-    }
 
     private String extractExtension(String filename) {
         int dot = filename.lastIndexOf('.');
