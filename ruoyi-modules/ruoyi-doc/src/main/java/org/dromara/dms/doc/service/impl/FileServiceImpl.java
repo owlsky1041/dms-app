@@ -12,7 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.dromara.dms.doc.config.MinIoConfig;
 import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.mapper.DocFileMapper;
+import org.dromara.dms.doc.mapper.DocPermissionQueryMapper;
 import org.dromara.dms.doc.service.FileService;
+import org.dromara.dms.doc.service.PermissionScopeResolver;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -34,12 +36,29 @@ import java.util.List;
 public class FileServiceImpl implements FileService {
 
     private final DocFileMapper fileMapper;
+    private final DocPermissionQueryMapper permQueryMapper;
+    private final PermissionScopeResolver scopeResolver;
     private final MinioClient minioClient;
     private final MinIoConfig minIoConfig;
 
     @Override
     public IPage<DocFile> pageByFolder(Long folderId, int page, int size, Long userId) {
-        return fileMapper.pageByFolder(new Page<>(page, size), folderId);
+        Page<DocFile> pageParam = new Page<>(page, size);
+        PermissionScopeResolver.Scope scope = scopeResolver.current();
+        // 超级管理员不受权限限制
+        if (scope.unrestricted()) {
+            return fileMapper.pageByFolder(pageParam, folderId);
+        }
+        // 文件夹本身不可见 → 该目录下不返回任何文件
+        List<Long> readableFolders = permQueryMapper.selectReadableFolderIds(
+                scope.userId(), scope.roleIds(), scope.deptIds());
+        if (!readableFolders.contains(folderId)) {
+            pageParam.setRecords(List.of());
+            pageParam.setTotal(0);
+            return pageParam;
+        }
+        return permQueryMapper.pageReadableFiles(pageParam, folderId, scope.userId(),
+                sentinelIfEmpty(readableFolders), scope.roleIds(), scope.deptIds());
     }
 
     @Override
@@ -119,7 +138,21 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public List<DocFile> search(String keyword, int limit, Long userId) {
-        return fileMapper.fulltextSearch(keyword, limit);
+        PermissionScopeResolver.Scope scope = scopeResolver.current();
+        if (scope.unrestricted()) {
+            return fileMapper.fulltextSearch(keyword, limit);
+        }
+        List<Long> readableFolders = permQueryMapper.selectReadableFolderIds(
+                scope.userId(), scope.roleIds(), scope.deptIds());
+        return permQueryMapper.searchReadableFiles(keyword, limit, scope.userId(),
+                sentinelIfEmpty(readableFolders), scope.roleIds(), scope.deptIds());
+    }
+
+    /**
+     * IN 子句不接受空集合，空时用 -1 占位（确保不命中任何行）
+     */
+    private List<Long> sentinelIfEmpty(List<Long> ids) {
+        return (ids == null || ids.isEmpty()) ? List.of(-1L) : ids;
     }
 
     @Override

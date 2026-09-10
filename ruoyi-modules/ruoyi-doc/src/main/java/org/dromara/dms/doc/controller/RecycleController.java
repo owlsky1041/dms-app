@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.core.domain.R;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.domain.DocFolder;
@@ -43,9 +44,33 @@ public class RecycleController {
     public R<Map<String, Object>> list() {
         Long userId = LoginHelper.getUserId();
         Map<String, Object> result = new HashMap<>();
-        result.put("folders", folderMapper.listDeletedFolders());
-        result.put("files", fileMapper.listDeleted());
+        // 普通用户只能看到自己（上传/所有）的回收站内容，超级管理员可见全部
+        if (LoginHelper.isSuperAdmin()) {
+            result.put("folders", folderMapper.listDeletedFolders());
+            result.put("files", fileMapper.listDeleted());
+        } else {
+            result.put("folders", folderMapper.listDeletedFoldersByOwner(userId));
+            result.put("files", fileMapper.listDeletedByCreator(userId));
+        }
         return R.ok(result);
+    }
+
+    /** 校验当前用户可操作该回收站文件（上传者本人或超级管理员） */
+    private void assertFileOwner(DocFile file, Long userId) {
+        if (file == null) return;
+        if (LoginHelper.isSuperAdmin()) return;
+        if (!userId.equals(file.getCreatorId())) {
+            throw new ServiceException("无权操作他人文件");
+        }
+    }
+
+    /** 校验当前用户可操作该回收站文件夹（所有者本人或超级管理员） */
+    private void assertFolderOwner(DocFolder folder, Long userId) {
+        if (folder == null) return;
+        if (LoginHelper.isSuperAdmin()) return;
+        if (!userId.equals(folder.getOwnerId())) {
+            throw new ServiceException("无权操作他人文件夹");
+        }
     }
 
     /**
@@ -54,6 +79,7 @@ public class RecycleController {
     @PostMapping("/files/{fileId}/restore")
     public R<Void> restoreFile(@PathVariable Long fileId) {
         Long userId = LoginHelper.getUserId();
+        assertFileOwner(fileMapper.selectById(fileId), userId);
         fileService.restore(fileId, userId);
         return R.ok();
     }
@@ -64,6 +90,7 @@ public class RecycleController {
     @PostMapping("/folders/{folderId}/restore")
     public R<Void> restoreFolder(@PathVariable Long folderId) {
         Long userId = LoginHelper.getUserId();
+        assertFolderOwner(folderMapper.selectById(folderId), userId);
         folderService.restore(folderId, userId);
         return R.ok();
     }
@@ -75,6 +102,7 @@ public class RecycleController {
     public R<Void> purgeFile(@PathVariable Long fileId) {
         Long userId = LoginHelper.getUserId();
         DocFile file = fileMapper.selectById(fileId);
+        assertFileOwner(file, userId);
         if (file != null) {
             fileTextMapper.deleteById(fileId);
             fileMapper.hardDelete(fileId);
@@ -90,6 +118,7 @@ public class RecycleController {
     public R<Void> purgeFolder(@PathVariable Long folderId) {
         Long userId = LoginHelper.getUserId();
         DocFolder folder = folderMapper.selectById(folderId);
+        assertFolderOwner(folder, userId);
         if (folder == null) return R.ok();
 
         // 子树 id（含自身）
@@ -119,12 +148,17 @@ public class RecycleController {
     @DeleteMapping("/empty")
     public R<Void> empty() {
         // 简化：仅清空当前回收站中的文件（文件夹回收站逐层清理复杂度高，先手动）
-        List<DocFile> files = fileMapper.listDeleted();
+        // 普通用户只清空自己的，超级管理员清空全部
+        Long userId = LoginHelper.getUserId();
+        boolean superAdmin = LoginHelper.isSuperAdmin();
+        List<DocFile> files = superAdmin ? fileMapper.listDeleted() : fileMapper.listDeletedByCreator(userId);
         for (DocFile f : files) {
             fileTextMapper.deleteById(f.getFileId());
             fileMapper.hardDelete(f.getFileId());
         }
-        List<DocFolder> folders = folderMapper.listDeletedFolders();
+        List<DocFolder> folders = superAdmin
+                ? folderMapper.listDeletedFolders()
+                : folderMapper.listDeletedFoldersByOwner(userId);
         for (DocFolder f : folders) {
             folderMapper.hardDelete(f.getFolderId());
         }

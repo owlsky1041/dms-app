@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.dromara.dms.doc.mapper.DocPermissionQueryMapper">
+
+    <!--
+      文件夹权限行的主体匹配（权限表固定别名 p）
+      - 未过期
+      - 含 VISIBLE 位（perm_flags & 1）
+      - 主体命中：本人 / 用户角色 / 用户部门（含祖先）
+    -->
+    <sql id="folderSubjectMatch">
+        (p.expires_at IS NULL OR p.expires_at &gt; NOW())
+        AND (p.perm_flags &amp; 1) &lt;&gt; 0
+        AND (
+            (p.subject_type = 'user' AND p.subject_id = #{userId})
+            <if test="roleIds != null and roleIds.size() &gt; 0">
+                OR (p.subject_type = 'role' AND p.subject_id IN
+                    <foreach collection="roleIds" item="rid" open="(" separator="," close=")">#{rid}</foreach>)
+            </if>
+            <if test="deptIds != null and deptIds.size() &gt; 0">
+                OR (p.subject_type = 'dept' AND p.subject_id IN
+                    <foreach collection="deptIds" item="did" open="(" separator="," close=")">#{did}</foreach>)
+            </if>
+        )
+    </sql>
+
+    <!--
+      文件级权限行的主体匹配（权限表固定别名 fp，不写 inherit，文件无子级）
+    -->
+    <sql id="fileSubjectMatch">
+        (fp.expires_at IS NULL OR fp.expires_at &gt; NOW())
+        AND (fp.perm_flags &amp; 1) &lt;&gt; 0
+        AND (
+            (fp.subject_type = 'user' AND fp.subject_id = #{userId})
+            <if test="roleIds != null and roleIds.size() &gt; 0">
+                OR (fp.subject_type = 'role' AND fp.subject_id IN
+                    <foreach collection="roleIds" item="rid" open="(" separator="," close=")">#{rid}</foreach>)
+            </if>
+            <if test="deptIds != null and deptIds.size() &gt; 0">
+                OR (fp.subject_type = 'dept' AND fp.subject_id IN
+                    <foreach collection="deptIds" item="did" open="(" separator="," close=")">#{did}</foreach>)
+            </if>
+        )
+    </sql>
+
+    <!--
+      可见文件夹集合：
+      - 本人所有（owner_id），或
+      - 自身存在命中授权，或
+      - 任一祖先（由物化路径 folder_path 解析）存在命中授权
+     -->
+    <select id="selectReadableFolderIds" resultType="java.lang.Long">
+        SELECT fd.folder_id
+        FROM doc_folder fd
+        WHERE fd.deleted_at IS NULL
+          AND (
+            fd.owner_id = #{userId}
+            OR EXISTS (
+                SELECT 1 FROM doc_folder_permission p
+                WHERE p.folder_id = fd.folder_id
+                  AND <include refid="folderSubjectMatch"/>
+            )
+            OR EXISTS (
+                SELECT 1 FROM doc_folder_permission p
+                WHERE p.folder_id = ANY (
+                          string_to_array(
+                              trim(both '/' from COALESCE(fd.folder_path, '/')), '/'
+                          )::bigint[]
+                      )
+                  AND <include refid="folderSubjectMatch"/>
+            )
+          )
+    </select>
+
+    <!--
+      文件可见条件（文件固定别名 f）：
+      - 本人上传（creator_id），或
+      - 所在文件夹在可见集合内（继承父文件夹权限），或
+      - 文件本身存在命中授权
+     -->
+    <sql id="fileVisible">
+        (
+            f.creator_id = #{userId}
+            OR f.folder_id IN
+                <foreach collection="readableFolderIds" item="fid" open="(" separator="," close=")">#{fid}</foreach>
+            OR EXISTS (
+                SELECT 1 FROM doc_file_permission fp
+                WHERE fp.file_id = f.file_id
+                  AND <include refid="fileSubjectMatch"/>
+            )
+        )
+    </sql>
+
+    <!-- 分页：某文件夹下可见文件（MyBatis-Plus 自动生成 count，total 准确） -->
+    <select id="pageReadableFiles" resultType="org.dromara.dms.doc.domain.DocFile">
+        SELECT f.*
+        FROM doc_file f
+        WHERE f.deleted_at IS NULL
+          AND f.folder_id = #{folderId}
+          AND <include refid="fileVisible"/>
+        ORDER BY f.file_name
+    </select>
+
+    <!-- 全文搜索（文件名 + 描述 + 提取正文），仅返回可见文件 -->
+    <select id="searchReadableFiles" resultType="org.dromara.dms.doc.domain.DocFile">
+        SELECT f.*
+        FROM doc_file f
+        LEFT JOIN doc_file_text t ON t.file_id = f.file_id
+        WHERE f.deleted_at IS NULL
+          AND (
+            f.file_name ILIKE '%' || #{keyword} || '%'
+            OR f.description ILIKE '%' || #{keyword} || '%'
+            OR t.extract_text ILIKE '%' || #{keyword} || '%'
+          )
+          AND <include refid="fileVisible"/>
+        ORDER BY f.create_time DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

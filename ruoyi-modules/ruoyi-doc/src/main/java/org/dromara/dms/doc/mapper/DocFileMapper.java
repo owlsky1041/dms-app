@@ -90,6 +90,12 @@ public interface DocFileMapper extends MPJBaseMapper<DocFile> {
     List<DocFile> listDeleted();
 
     /**
+     * 回收站文件（仅本人上传的）—— 普通用户只能看到自己的回收站
+     */
+    @Select("SELECT * FROM doc_file WHERE deleted_at IS NOT NULL AND creator_id = #{userId} ORDER BY deleted_at DESC")
+    List<DocFile> listDeletedByCreator(@Param("userId") Long userId);
+
+    /**
      * 全文搜索（文件名 ILIKE + 提取文本 ILIKE，支持中英文；pg_trgm 索引加速前缀/模糊）
      */
     @Select(value = "SELECT f.* FROM doc_file f " +

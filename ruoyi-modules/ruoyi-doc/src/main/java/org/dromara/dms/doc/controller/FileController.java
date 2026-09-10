@@ -49,6 +49,7 @@ public class FileController {
     @GetMapping("/{fileId}")
     public R<DocFile> detail(@PathVariable Long fileId) {
         Long userId = LoginHelper.getUserId();
+        checkPerm(fileId, userId, PermissionFlag.VISIBLE);
         return R.ok(fileService.getById(fileId, userId));
     }
 
@@ -81,6 +82,7 @@ public class FileController {
     @PostMapping("/{fileId}/copy")
     public R<Long> copy(@PathVariable Long fileId, @RequestParam Long targetFolderId) {
         Long userId = LoginHelper.getUserId();
+        checkPerm(fileId, userId, PermissionFlag.VISIBLE);
         Long newId = fileService.copy(fileId, targetFolderId, userId);
         return R.ok(newId);
     }
@@ -91,6 +93,11 @@ public class FileController {
     @PutMapping("/batch-move")
     public R<Void> batchMove(@RequestBody BatchMoveRequest req) {
         Long userId = LoginHelper.getUserId();
+        if (req.getFileIds() != null) {
+            for (Long id : req.getFileIds()) {
+                checkPerm(id, userId, PermissionFlag.EDIT);
+            }
+        }
         fileService.moveBatch(req.getFileIds(), req.getTargetFolderId(), userId);
         return R.ok();
     }
@@ -127,6 +134,7 @@ public class FileController {
                          HttpServletRequest request,
                          HttpServletResponse response) throws IOException {
         Long userId = LoginHelper.getUserId();
+        checkPerm(fileId, userId, PermissionFlag.DOWNLOAD);
         fileService.download(fileId, request, response);
     }
 
@@ -141,6 +149,7 @@ public class FileController {
                         HttpServletRequest request,
                         HttpServletResponse response) throws IOException {
         Long userId = LoginHelper.getUserId();
+        checkPerm(fileId, userId, PermissionFlag.PREVIEW);
         fileService.streamContent(fileId, request, response);
     }
 
@@ -151,6 +160,7 @@ public class FileController {
     public void thumbnail(@PathVariable Long fileId,
                           HttpServletResponse response) throws IOException {
         Long userId = LoginHelper.getUserId();
+        checkPerm(fileId, userId, PermissionFlag.PREVIEW);
         fileService.streamThumbnail(fileId, response);
     }
 

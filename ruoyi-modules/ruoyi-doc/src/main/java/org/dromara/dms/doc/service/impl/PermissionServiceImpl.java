@@ -12,8 +12,8 @@ import org.dromara.dms.doc.mapper.DocFilePermissionMapper;
 import org.dromara.dms.doc.mapper.DocFolderPermissionMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
 import org.dromara.dms.doc.mapper.DocFileMapper;
+import org.dromara.dms.doc.service.PermissionScopeResolver;
 import org.dromara.dms.doc.service.PermissionService;
-import org.dromara.system.api.model.LoginUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +46,7 @@ public class PermissionServiceImpl implements PermissionService {
     private final DocFilePermissionMapper filePermMapper;
     private final DocFolderMapper folderMapper;
     private final DocFileMapper fileMapper;
+    private final PermissionScopeResolver scopeResolver;
 
     @Override
     public List<DocFolderPermission> listFolderPermissions(Long folderId, Long operatorId) {
@@ -144,8 +145,9 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public int computeUserFlags(String resourceType, Long resourceId, Long userId) {
-        Collection<Long> roleIds = roleIdsOf(userId);
-        Collection<Long> deptIds = deptIdsOf(userId);
+        // 与列表/搜索过滤共用同一主体解析，避免两处口径不一致
+        Collection<Long> roleIds = scopeResolver.currentRoleIds();
+        Collection<Long> deptIds = scopeResolver.currentDeptIds();
         if ("folder".equalsIgnoreCase(resourceType)) {
             return computeFolderFlags(resourceId, userId, roleIds, deptIds);
         } else if ("file".equalsIgnoreCase(resourceType)) {
@@ -155,41 +157,6 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     // ================= 内部方法 =================
-
-    /**
-     * 当前用户全部角色 ID（从 LoginUser.roles 提取）
-     */
-    private Collection<Long> roleIdsOf(Long userId) {
-        try {
-            var user = LoginHelper.<LoginUser>getLoginUser();
-            if (user == null || user.getRoles() == null) return Set.of();
-            Set<Long> ids = new HashSet<>();
-            for (var role : user.getRoles()) {
-                if (role != null && role.getRoleId() != null) {
-                    ids.add(role.getRoleId());
-                }
-            }
-            return ids;
-        } catch (Exception e) {
-            return Set.of();
-        }
-    }
-
-    /**
-     * 用户部门及所有祖先链 deptId（由 sys_dept.ancestors 拆分）
-     * 简化：LoginHelper 提供 deptId，祖先链暂用自身（父部门授权后续加强）
-     */
-    private Collection<Long> deptIdsOf(Long userId) {
-        Set<Long> ids = new HashSet<>();
-        try {
-            Long deptId = LoginHelper.getDeptId();
-            if (deptId != null) {
-                ids.add(deptId);
-            }
-        } catch (Exception ignored) {
-        }
-        return ids;
-    }
 
     /**
      * 计算文件夹权限（含父链继承）

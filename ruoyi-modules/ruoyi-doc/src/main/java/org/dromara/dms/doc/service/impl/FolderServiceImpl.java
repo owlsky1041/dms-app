@@ -6,8 +6,10 @@ import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
 import org.dromara.dms.doc.mapper.DocFolderPermissionMapper;
+import org.dromara.dms.doc.mapper.DocPermissionQueryMapper;
 import org.dromara.dms.doc.service.FolderService;
 import org.dromara.dms.doc.service.PermissionChecker;
+import org.dromara.dms.doc.service.PermissionScopeResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,8 @@ public class FolderServiceImpl implements FolderService {
     private final DocFolderMapper folderMapper;
     private final DocFolderPermissionMapper folderPermMapper;
     private final PermissionChecker permissionChecker;
+    private final DocPermissionQueryMapper permQueryMapper;
+    private final PermissionScopeResolver scopeResolver;
     private final DocFileMapper fileMapper;
 
     @Override
@@ -166,8 +170,18 @@ public class FolderServiceImpl implements FolderService {
 
     @Override
     public List<DocFolder> listChildren(Long parentId, Long userId) {
-        // 权限过滤在 Controller 或 Service 层用 PermissionChecker 二次过滤
-        return folderMapper.listChildren(parentId);
+        List<DocFolder> children = folderMapper.listChildren(parentId);
+        PermissionScopeResolver.Scope scope = scopeResolver.current();
+        // 超级管理员不受权限限制
+        if (scope.unrestricted()) {
+            return children;
+        }
+        // 只保留当前用户可见（VISIBLE）的子文件夹
+        List<Long> readable = permQueryMapper.selectReadableFolderIds(
+                scope.userId(), scope.roleIds(), scope.deptIds());
+        return children.stream()
+                .filter(f -> readable.contains(f.getFolderId()))
+                .toList();
     }
 
     @Override
@@ -182,7 +196,16 @@ public class FolderServiceImpl implements FolderService {
             result.add(0, f);
             current = f.getParentId();
         }
-        return result;
+        PermissionScopeResolver.Scope scope = scopeResolver.current();
+        if (scope.unrestricted()) {
+            return result;
+        }
+        // 不可见的祖先不下发（避免泄露无权限目录名）
+        List<Long> readable = permQueryMapper.selectReadableFolderIds(
+                scope.userId(), scope.roleIds(), scope.deptIds());
+        return result.stream()
+                .filter(f -> readable.contains(f.getFolderId()))
+                .toList();
     }
 
     @Override

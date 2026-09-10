@@ -2,6 +2,8 @@ package org.dromara.dms.doc.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.dromara.dms.doc.domain.DocFile;
+import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.enums.PermissionFlag;
 import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFilePermissionMapper;
@@ -67,10 +69,16 @@ public class PermissionCheckerImpl implements PermissionChecker {
             return Integer.parseInt(cached);
         }
 
-        // 2. 文件直接权限
+        // 2. 所有者（上传者）自动完全控制 —— 与 PermissionServiceImpl 口径一致
+        DocFile file = fileMapper.selectById(fileId);
+        if (file != null && userId.equals(file.getCreatorId())) {
+            return PermissionFlag.FULL;
+        }
+
+        // 3. 文件直接权限
         int flags = filePermMapper.sumFlags(fileId, userId, roleIds, deptIds);
 
-        // 3. 若文件无直接权限或权限位不全，沿父文件夹链继承
+        // 4. 若文件无直接权限或权限位不全，沿父文件夹链继承
         Long folderId = fileMapper.getFolderId(fileId);
         if (folderId != null) {
             flags |= computeFolderFlagsWithCache(userId, roleIds, deptIds, folderId, new HashSet<>());
@@ -100,6 +108,12 @@ public class PermissionCheckerImpl implements PermissionChecker {
                                             Long folderId, Set<Long> visited) {
         if (folderId == null || folderId == 0L || !visited.add(folderId)) {
             return 0;
+        }
+
+        // 0. 所有者自动完全控制 —— 与 PermissionServiceImpl 口径一致
+        DocFolder owned = folderMapper.selectById(folderId);
+        if (owned != null && userId.equals(owned.getOwnerId())) {
+            return PermissionFlag.FULL;
         }
 
         // 1. 当前文件夹权限

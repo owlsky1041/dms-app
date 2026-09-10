@@ -65,6 +65,12 @@ public interface DocFolderMapper extends MPJBaseMapper<DocFolder> {
     List<DocFolder> listDeletedFolders();
 
     /**
+     * 回收站文件夹（仅本人所有）—— 普通用户只能看到自己的回收站
+     */
+    @Select("SELECT * FROM doc_folder WHERE deleted_at IS NOT NULL AND owner_id = #{userId} ORDER BY deleted_at DESC")
+    List<DocFolder> listDeletedFoldersByOwner(@Param("userId") Long userId);
+
+    /**
      * 物理删除文件夹（连同其物化路径子树）
      */
     @Select("SELECT folder_id FROM doc_folder WHERE folder_path LIKE CONCAT(#{pathPrefix}, '%') OR folder_id = #{folderId}")
