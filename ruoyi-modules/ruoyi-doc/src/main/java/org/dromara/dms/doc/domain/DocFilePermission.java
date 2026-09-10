@@ -35,8 +35,4 @@ public class DocFilePermission implements Serializable {
     private Long grantedBy;
     private LocalDateTime grantedAt;
     private LocalDateTime expiresAt;
-
-    // ========== 视图附加 ==========
-
-    private transient String subjectName;
 }

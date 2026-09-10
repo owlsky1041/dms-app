@@ -36,9 +36,4 @@ public class DocFolderPermission implements Serializable {
     private Long grantedBy;
     private LocalDateTime grantedAt;
     private LocalDateTime expiresAt;
-
-    // ========== 视图附加 ==========
-
-    /** 主体名称（用于 UI 显示） */
-    private transient String subjectName;
 }
