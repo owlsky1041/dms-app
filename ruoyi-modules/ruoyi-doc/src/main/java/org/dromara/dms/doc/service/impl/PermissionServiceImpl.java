@@ -232,16 +232,17 @@ public class PermissionServiceImpl implements PermissionService {
     /**
      * 计算文件权限（直接权限 + 所在文件夹继承）
      *
-     * <p>上传者规则：<b>上传者仅获得「编辑」权限</b>，完全控制权归文档区所有者
-     * （通过所在文件夹链上的 owner_id 得到 255）。上传者不能删除、不能改权限。
+     * <p>上传者规则：<b>上传者获得「编辑 + 删除」权限</b>（可改名、可删除自己上传的错误文件），
+     * 完全控制权仍归文档区所有者（通过所在文件夹链上的 owner_id 得到 255）。
+     * 上传者不能分配权限、不能撤销他人授权。
      */
     private int computeFileFlags(Long fileId, Long userId,
                                  Collection<Long> roleIds, Collection<Long> deptIds) {
         var file = fileMapper.selectById(fileId);
         int flags = 0;
-        // 上传者：仅编辑权（不含删除/完全控制）
+        // 上传者：编辑 + 删除（可清理自己上传的错误文件），不含完全控制
         if (file != null && userId.equals(file.getCreatorId())) {
-            flags |= PermissionFlag.EDIT.getCode();
+            flags |= PermissionFlag.EDIT.getCode() | PermissionFlag.DELETE.getCode();
         }
         flags |= filePermMapper.sumFlags(fileId, userId, roleIds, deptIds);
         if (file != null && file.getFolderId() != null) {
