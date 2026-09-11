@@ -396,5 +396,7 @@ dms:
     url: http://dms.example.internal:8081
     # 文档服务反向拉取本站文档用的地址（容器访问宿主机；留空则用 127.0.0.1）
     document-base-url: http://dms.example.internal
+    # 文档服务内部调用地址（后端 -> 文档服务，用于读取支持格式等）
+    internal-url: http://127.0.0.1:8081
     # 临时下载令牌签名密钥
     secret: dms-onlyoffice-2026

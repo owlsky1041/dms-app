@@ -13,12 +13,13 @@ import java.util.Set;
  */
 public interface OnlyOfficeService {
 
-    /** 支持在线查看的扩展名 */
-    Set<String> SUPPORTED_EXT = Set.of(
-            "doc", "docx", "odt", "rtf", "txt",
-            "xls", "xlsx", "ods", "csv",
-            "ppt", "pptx", "odp",
-            "pdf");
+    /**
+     * 支持在线查看的扩展名 → 文档类型（word/cell/slide/pdf/diagram）
+     *
+     * <p>列表运行时取自文档服务的 {@code /meta/formats}（带缓存，失败时回退到内置基线），
+     * 因此文档服务升级后新增的格式无需改代码即可生效。
+     */
+    Map<String, String> supportedFormats();
 
     /**
      * 该扩展名是否可用 OnlyOffice 查看

@@ -22,7 +22,6 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * OnlyOffice 集成实现
@@ -34,10 +33,41 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class OnlyOfficeServiceImpl implements OnlyOfficeService {
 
-    /** 文档类型映射 */
-    private static final Set<String> WORD_EXT = Set.of("doc", "docx", "odt", "rtf", "txt");
-    private static final Set<String> CELL_EXT = Set.of("xls", "xlsx", "ods", "csv");
-    private static final Set<String> SLIDE_EXT = Set.of("ppt", "pptx", "odp");
+    /**
+     * 内置基线：文档服务不可达时使用。
+     * 与 OnlyOffice 9.4 的 /meta/formats 中「支持 view」的格式一致。
+     */
+    private static final Map<String, String> BASELINE_FORMATS = buildBaseline();
+
+    private static Map<String, String> buildBaseline() {
+        Map<String, String> m = new HashMap<>();
+        // word
+        for (String e : "doc,docm,docx,dot,dotm,dotx,epub,fb2,fodt,gdoc,hml,htm,html,hwp,hwpx,md,mht,mhtml,odt,ott,pages,rtf,stw,sxw,txt,wps,wpt,xml".split(",")) {
+            m.put(e, "word");
+        }
+        // cell
+        for (String e : "csv,et,ett,fods,gsheet,numbers,ods,ots,sxc,tsv,xls,xlsb,xlsm,xlsx,xlt,xltm,xltx".split(",")) {
+            m.put(e, "cell");
+        }
+        // slide
+        for (String e : "dps,dpt,fodp,gslides,key,odg,odp,otp,pot,potm,potx,pps,ppsm,ppsx,ppt,pptm,pptx,sxi".split(",")) {
+            m.put(e, "slide");
+        }
+        // pdf
+        for (String e : "djvu,docxf,oform,oxps,pdf,xps".split(",")) {
+            m.put(e, "pdf");
+        }
+        // diagram（Visio）
+        for (String e : "vsdm,vsdx,vssm,vssx,vstm,vstx".split(",")) {
+            m.put(e, "diagram");
+        }
+        return Map.copyOf(m);
+    }
+
+    /** /meta/formats 的缓存与有效期 */
+    private volatile Map<String, String> cachedFormats = BASELINE_FORMATS;
+    private volatile long cachedAt = 0L;
+    private static final long FORMAT_CACHE_MS = 60 * 60 * 1000L;
 
     /** 临时下载令牌有效期（毫秒）：足够 OnlyOffice 取到文档 */
     private static final long TOKEN_TTL_MS = 30 * 60 * 1000L;
@@ -60,18 +90,71 @@ public class OnlyOfficeServiceImpl implements OnlyOfficeService {
     @Value("${dms.onlyoffice.secret:dms-onlyoffice-secret}")
     private String secret;
 
+    /** 文档服务内部调用地址（后端 → 文档服务，用于读取支持格式等） */
+    @Value("${dms.onlyoffice.internal-url:http://127.0.0.1:8081}")
+    private String internalUrl;
+
+    @Override
+    public Map<String, String> supportedFormats() {
+        long now = System.currentTimeMillis();
+        if (now - cachedAt < FORMAT_CACHE_MS) {
+            return cachedFormats;
+        }
+        try {
+            Map<String, String> fetched = fetchFormatsFromServer();
+            if (!fetched.isEmpty()) {
+                cachedFormats = Map.copyOf(fetched);
+                cachedAt = now;
+                return cachedFormats;
+            }
+        } catch (Exception e) {
+            log.warn("获取文档服务支持格式失败，沿用上次结果: {}", e.getMessage());
+        }
+        cachedAt = now;   // 失败也记时间，避免每次请求都重试
+        return cachedFormats;
+    }
+
+    /**
+     * 调文档服务的 /meta/formats，取「支持 view 动作」的扩展名及其类型
+     */
+    private Map<String, String> fetchFormatsFromServer() throws Exception {
+        String url = internalUrl.replaceAll("/$", "") + "/meta/formats";
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
+                new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(3000);
+        factory.setReadTimeout(5000);
+        String body = new org.springframework.web.client.RestTemplate(factory).getForObject(url, String.class);
+        if (StringUtils.isBlank(body)) {
+            return Map.of();
+        }
+        Map<String, String> result = new HashMap<>();
+        var nodes = cn.hutool.json.JSONUtil.parseArray(body);
+        for (Object node : nodes) {
+            var obj = (cn.hutool.json.JSONObject) node;
+            String type = obj.getStr("type");
+            String name = obj.getStr("name");
+            if (StringUtils.isBlank(type) || StringUtils.isBlank(name)) {
+                continue;
+            }
+            var actions = obj.getJSONArray("actions");
+            if (actions == null || !actions.contains("view")) {
+                continue;
+            }
+            result.put(name.toLowerCase(Locale.ROOT), type.toLowerCase(Locale.ROOT));
+        }
+        return result;
+    }
+
     @Override
     public boolean supports(String fileExtension) {
-        return fileExtension != null && SUPPORTED_EXT.contains(fileExtension.toLowerCase(Locale.ROOT));
+        return fileExtension != null
+                && supportedFormats().containsKey(fileExtension.toLowerCase(Locale.ROOT));
     }
 
     @Override
     public Map<String, Object> buildEditorConfig(DocFile file, Long userId) {
         String ext = file.getFileExtension() == null ? "" : file.getFileExtension().toLowerCase(Locale.ROOT);
-        String documentType = WORD_EXT.contains(ext) ? "word"
-                : CELL_EXT.contains(ext) ? "cell"
-                : SLIDE_EXT.contains(ext) ? "slide"
-                : "pdf";
+        String documentType = supportedFormats().getOrDefault(ext, "word");
 
         String token = issueToken(file.getFileId(), userId);
         String base = StringUtils.isBlank(documentBaseUrl) ? onlyOfficeUrl : documentBaseUrl;

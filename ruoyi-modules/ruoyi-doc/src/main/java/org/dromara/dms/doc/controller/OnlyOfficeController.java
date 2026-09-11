@@ -83,6 +83,16 @@ public class OnlyOfficeController {
     }
 
     /**
+     * 支持在线查看的格式（扩展名 → 文档类型）
+     *
+     * <p>前端据此决定文件是否走 OnlyOffice，避免前端硬编码格式清单。
+     */
+    @GetMapping("/formats")
+    public R<Map<String, String>> formats() {
+        return R.ok(onlyOfficeService.supportedFormats());
+    }
+
+    /**
      * 水印配置（预览浮层使用；内容可在系统参数中配置）
      */
     @GetMapping("/watermark")
