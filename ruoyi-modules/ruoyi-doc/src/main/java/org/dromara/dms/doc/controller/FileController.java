@@ -60,7 +60,8 @@ public class FileController {
     @PutMapping("/{fileId}/rename")
     public R<Void> rename(@PathVariable Long fileId, @RequestParam String name) {
         Long userId = LoginHelper.getUserId();
-        checkPerm(fileId, userId, PermissionFlag.EDIT);
+        // 「编辑」位已取消：重命名/移动需完全控制，或本人是上传者
+        permissionService.requireFileManageable(fileId, userId);
         fileService.rename(fileId, name, userId);
         return R.ok();
     }
@@ -71,7 +72,7 @@ public class FileController {
     @PutMapping("/{fileId}/move")
     public R<Void> move(@PathVariable Long fileId, @RequestParam Long targetFolderId) {
         Long userId = LoginHelper.getUserId();
-        checkPerm(fileId, userId, PermissionFlag.EDIT);
+        permissionService.requireFileManageable(fileId, userId);
         permissionService.requireFolder(targetFolderId, PermissionFlag.UPLOAD, userId);
         fileService.move(fileId, targetFolderId, userId);
         return R.ok();
@@ -97,7 +98,7 @@ public class FileController {
         Long userId = LoginHelper.getUserId();
         if (req.getFileIds() != null) {
             for (Long id : req.getFileIds()) {
-                checkPerm(id, userId, PermissionFlag.EDIT);
+                permissionService.requireFileManageable(id, userId);
             }
         }
         permissionService.requireFolder(req.getTargetFolderId(), PermissionFlag.UPLOAD, userId);

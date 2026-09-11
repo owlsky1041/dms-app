@@ -52,7 +52,8 @@ public class FolderController {
                 throw new ServiceException("仅超级管理员可创建顶层文档区");
             }
         } else {
-            permissionService.requireFolder(parentId, PermissionFlag.CREATE_CHILD, userId);
+            // 「创建子项」位已取消：在目录内新建子目录归入「上传」语义
+            permissionService.requireFolder(parentId, PermissionFlag.UPLOAD, userId);
         }
         return R.ok(folderService.create(parentId, req.getName(), userId));
     }
@@ -61,23 +62,25 @@ public class FolderController {
     @PutMapping("/{folderId}/rename")
     public R<Void> rename(@PathVariable Long folderId, @RequestParam String name) {
         Long userId = LoginHelper.getUserId();
-        permissionService.requireFolder(folderId, PermissionFlag.EDIT, userId);
+        // 「编辑」位已取消：重命名/移动需完全控制
+        permissionService.requireFolder(folderId, PermissionFlag.FULL_CONTROL, userId);
         folderService.rename(folderId, name, userId);
         return R.ok();
     }
 
-    /** 移动（源需「编辑」权限，目标需「创建子项」权限；移动到顶层仅超级管理员） */
+    /** 移动（源需「完全控制」，目标需「上传」；移动到顶层仅超级管理员） */
     @PutMapping("/{folderId}/move")
     public R<Void> move(@PathVariable Long folderId, @RequestBody MoveFolderRequest req) {
         Long userId = LoginHelper.getUserId();
-        permissionService.requireFolder(folderId, PermissionFlag.EDIT, userId);
+        permissionService.requireFolder(folderId, PermissionFlag.FULL_CONTROL, userId);
         Long newParentId = req.getNewParentId();
         if (newParentId == null || newParentId == 0L) {
             if (!LoginHelper.isSuperAdmin()) {
                 throw new ServiceException("仅超级管理员可调整顶层文档区");
             }
         } else {
-            permissionService.requireFolder(newParentId, PermissionFlag.CREATE_CHILD, userId);
+            // 目标父目录需「上传」权限（往目录里添东西）
+            permissionService.requireFolder(newParentId, PermissionFlag.UPLOAD, userId);
         }
         folderService.move(folderId, newParentId, userId);
         return R.ok();

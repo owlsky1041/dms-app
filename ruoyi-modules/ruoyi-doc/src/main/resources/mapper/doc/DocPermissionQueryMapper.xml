@@ -8,6 +8,42 @@
       - 含 VISIBLE 位（perm_flags & 1）
       - 主体命中：本人 / 用户角色 / 用户部门（含祖先）
     -->
+    <!--
+      禁止访问匹配（权限表固定别名 p/fp）：命中该主体的「禁止访问」位（256），
+      且未过期。禁止位不参与普通授权，单独匹配。
+    -->
+    <sql id="folderDenyMatch">
+        (p.expires_at IS NULL OR p.expires_at &gt; NOW())
+        AND (p.perm_flags &amp; 256) &lt;&gt; 0
+        AND (
+            (p.subject_type = 'user' AND p.subject_id = #{userId})
+            <if test="roleIds != null and roleIds.size() &gt; 0">
+                OR (p.subject_type = 'role' AND p.subject_id IN
+                    <foreach collection="roleIds" item="rid" open="(" separator="," close=")">#{rid}</foreach>)
+            </if>
+            <if test="deptIds != null and deptIds.size() &gt; 0">
+                OR (p.subject_type = 'dept' AND p.subject_id IN
+                    <foreach collection="deptIds" item="did" open="(" separator="," close=")">#{did}</foreach>)
+            </if>
+        )
+    </sql>
+
+    <sql id="fileDenyMatch">
+        (fp.expires_at IS NULL OR fp.expires_at &gt; NOW())
+        AND (fp.perm_flags &amp; 256) &lt;&gt; 0
+        AND (
+            (fp.subject_type = 'user' AND fp.subject_id = #{userId})
+            <if test="roleIds != null and roleIds.size() &gt; 0">
+                OR (fp.subject_type = 'role' AND fp.subject_id IN
+                    <foreach collection="roleIds" item="rid" open="(" separator="," close=")">#{rid}</foreach>)
+            </if>
+            <if test="deptIds != null and deptIds.size() &gt; 0">
+                OR (fp.subject_type = 'dept' AND fp.subject_id IN
+                    <foreach collection="deptIds" item="did" open="(" separator="," close=")">#{did}</foreach>)
+            </if>
+        )
+    </sql>
+
     <sql id="folderSubjectMatch">
         (p.expires_at IS NULL OR p.expires_at &gt; NOW())
         AND (p.perm_flags &amp; 1) &lt;&gt; 0
@@ -70,6 +106,17 @@
                   AND <include refid="folderSubjectMatch"/>
             )
           )
+          -- 禁止访问：本层或任一祖先命中即完全不可见（向下继承）
+          AND NOT EXISTS (
+              SELECT 1 FROM doc_folder_permission p
+              WHERE ( p.folder_id = fd.folder_id
+                      OR p.folder_id = ANY (
+                             string_to_array(
+                                 trim(both '/' from COALESCE(fd.folder_path, '/')), '/'
+                             )::bigint[]
+                         ) )
+                AND <include refid="folderDenyMatch"/>
+          )
     </select>
 
     <!--
@@ -90,6 +137,12 @@
                 WHERE fp.file_id = f.file_id
                   AND <include refid="fileSubjectMatch"/>
             )
+        )
+        -- 文件级「禁止访问」：命中即不可见
+        AND NOT EXISTS (
+            SELECT 1 FROM doc_file_permission fp
+            WHERE fp.file_id = f.file_id
+              AND <include refid="fileDenyMatch"/>
         )
     </sql>
 

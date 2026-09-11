@@ -71,4 +71,17 @@ public interface PermissionService {
      * 是否具备文件夹权限（不抛异常）
      */
     boolean hasFolder(Long folderId, PermissionFlag flag, Long userId);
+
+    /**
+     * 是否可管理文件（重命名/移动）
+     *
+     * <p>规则：具备「完全控制」，或本人是该文件的上传者。
+     * 「编辑」位已取消，改由本方法统一判定。
+     */
+    boolean canManageFile(Long fileId, Long userId);
+
+    /**
+     * 校验文件可管理性，不满足抛 ServiceException
+     */
+    void requireFileManageable(Long fileId, Long userId);
 }

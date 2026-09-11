@@ -88,8 +88,7 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
         if (relativePath != null && !relativePath.isBlank()) {
             String dirPart = relativePath.substring(0, Math.max(0, relativePath.lastIndexOf('/')));
             if (!dirPart.isBlank()) {
-                // 自动创建子文件夹属「创建子项」语义，需额外具备该权限位
-                permissionService.requireFolder(folderId, PermissionFlag.CREATE_CHILD, userId);
+                // 「创建子项」位已取消：文件夹上传自动建目录包含在「上传」权限内
                 folderId = ensureFolderChain(folderId, dirPart, userId);
             }
         }
