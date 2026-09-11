@@ -114,6 +114,8 @@ security:
     # 站点配置：登录页需要在未登录状态读取站点名称/备案/版权与图标
     - /api/site/config
     - /api/site/favicon
+    # OnlyOffice 取文档：由服务端直接拉取，无法携带登录态，改用短期 HMAC 令牌校验
+    - /api/onlyoffice/file/**
 
 # MyBatisPlus配置
 # https://baomidou.com/config/
@@ -388,3 +390,11 @@ spring.ai.mcp:
 dms:
   site:
     asset-dir: /opt/dms/site-assets
+  # OnlyOffice 文档服务
+  onlyoffice:
+    # 浏览器访问文档服务的地址
+    url: http://dms.example.internal:8081
+    # 文档服务反向拉取本站文档用的地址（容器访问宿主机；留空则用 127.0.0.1）
+    document-base-url: http://dms.example.internal
+    # 临时下载令牌签名密钥
+    secret: dms-onlyoffice-2026
