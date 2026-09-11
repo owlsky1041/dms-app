@@ -111,6 +111,9 @@ security:
     - /warm-flow-ui/config
     - /snail-chat/**
     - /api/snail/chat/**
+    # 站点配置：登录页需要在未登录状态读取站点名称/备案/版权与图标
+    - /api/site/config
+    - /api/site/favicon
 
 # MyBatisPlus配置
 # https://baomidou.com/config/
@@ -380,3 +383,8 @@ spring.ai.mcp:
             - -y
             - '@modelcontextprotocol/server-filesystem'
             - D:/data
+
+# DMS 站点资源（站点图标等）
+dms:
+  site:
+    asset-dir: /opt/dms/site-assets
