@@ -1,0 +1,125 @@
+# =============================================================================
+# DMS 应用外部配置（profile: prod）
+#
+# 由 release/deploy/install.sh 从本模板生成，占位符 @@XXX@@ 会被替换为实际值，
+# 生成后落在 /opt/dms/config/application-prod.yml（权限 640 root:dms —— 里面是口令）。
+#
+# 为什么用外部配置而不是打进 jar：
+#   jar 是通用产物，口令必须留在服务器上，不能进版本库、更不能随镜像分发。
+#   systemd 用 --spring.config.additional-location 指向本目录，优先级高于 jar 内置配置。
+#
+# 注意：jar 内置的 application.yml 把 profiles.active 写死为 dev，
+#       所以 systemd 里显式传 --spring.profiles.active=prod（命令行参数优先级最高），
+#       这样"用哪个 profile"不依赖打包时的偶然选择。
+# =============================================================================
+
+# ---- 对外只监听回环：所有外部访问必须经 nginx（TLS/限流/访问日志的唯一入口）----
+server:
+  address: 127.0.0.1
+  port: @@APP_PORT@@
+
+spring:
+  # ---- 数据源：必须显式给出，jar 内置的是框架默认口令 ----
+  datasource:
+    dynamic:
+      datasource:
+        master:
+          url: jdbc:postgresql://@@DB_HOST@@:@@DB_PORT@@/@@DB_NAME@@?useUnicode=true&characterEncoding=utf8&stringtype=unspecified
+          username: @@DB_USER@@
+          password: @@DB_PASSWORD@@
+          driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: @@REDIS_HOST@@
+      port: @@REDIS_PORT@@
+      database: @@REDIS_DB@@
+      password: @@REDIS_PASSWORD@@
+  # multipart 临时目录必须显式指定并保证可写：
+  #   jar 内置的 prod profile 写的是 /ruoyi/server/temp（框架作者机器的路径），
+  #   在 systemd ProtectSystem=strict 下 /ruoyi 不可写 → 上传站点图标、OnlyOffice 取文档会失败。
+  # 同时它必须是 systemd 单元里 ReadWritePaths 之内的目录。
+  servlet:
+    multipart:
+      location: @@MULTIPART_TMP@@
+      max-file-size: @@MAX_UPLOAD_TEXT@@
+      max-request-size: @@MAX_UPLOAD_TEXT@@
+
+# ---- Sa-Token JWT 签名密钥：换掉后所有已登录会话失效（需要重新登录一次）----
+sa-token:
+  jwt-secret-key: @@JWT_SECRET@@
+
+# ---- 关闭接口加密与登录验证码（内网部署，前端对接简单）----
+api-decrypt:
+  enabled: false
+captcha:
+  enable: false
+
+logging:
+  level:
+    # 生产用 INFO：DEBUG 会把权限判定、SQL 细节全写盘（实测一天 26MB）
+    org.dromara.dms: INFO
+    org.dromara: INFO
+  file:
+    name: @@LOG_DIR@@/dms.log
+
+# =============================================================================
+# DMS 业务配置
+# =============================================================================
+dms:
+  # ---- 上传（tus 断点续传）----
+  tus:
+    upload-uri: /api/upload/tus
+    temp-dir: @@TUS_DIR@@
+    # 临时文件清理：tus 自带的过期机制不会自动跑，必须有人定期调 cleanup()。
+    # 上传中断/半途关页/完成失败都会留下临时文件，单文件上限 10GB，不清会吃满系统盘。
+    cleanup-cron: "0 20 4 * * ?"
+    stale-hours: 48
+    warn-bytes: 5368709120
+
+  upload:
+    max-size: @@MAX_UPLOAD_BYTES@@
+
+  # ---- 对象存储 ----
+  minio:
+    endpoint: @@MINIO_ENDPOINT@@
+    access-key: @@MINIO_ACCESS_KEY@@
+    secret-key: @@MINIO_SECRET_KEY@@
+    bucket: @@MINIO_BUCKET@@
+    region: ""
+    # 对象存储实际落盘目录：只影响「系统信息」页的展示与统计
+    data-dir: @@MINIO_DATA_DIR@@
+    # 控制台只监听回环，需 SSH 隧道才能打开
+    console-hint: "ssh -L 9001:127.0.0.1:9001 root@@@SERVER_HOST@@ 然后浏览 http://localhost:9001"
+
+  # ---- Office 文档在线预览（OnlyOffice）----
+  onlyoffice:
+    # 留空 = 与本站同源（浏览器只能访问 80 端口，8081 不对外，故经 nginx 反代）
+    url: ""
+    # OnlyOffice 容器反向拉取本站文档的地址（容器 -> 宿主机）
+    document-base-url: @@SITE_ORIGIN@@
+    # 仅当 OnlyOffice 打开 JWT 校验时才需要与本文件保持一致（默认关闭，见部署手册）
+    secret: @@ONLYOFFICE_SECRET@@
+
+  # ---- 图片/视频直链的签名密钥 ----
+  # 留空则每次启动用随机密钥：服务一重启，正在看的图片/视频链接就失效，所以固定下来。
+  media:
+    token-secret: @@MEDIA_TOKEN_SECRET@@
+    token-ttl-minutes: 120
+
+  # ---- 文档服务的临时/落盘目录 ----
+  export:
+    dir: @@EXPORT_DIR@@
+  site:
+    asset-dir: @@ASSET_DIR@@
+  download:
+    zip:
+      async-dir: @@ZIP_ASYNC_DIR@@
+
+  # ---- LibreOffice（Office 文档转 PDF 预览）----
+  office:
+    home: /usr/lib/libreoffice
+
+  # ---- 视频预览转码 ----
+  video:
+    ffmpeg-bin: /usr/bin/ffmpeg
+    ffprobe-bin: /usr/bin/ffprobe

@@ -1,0 +1,43 @@
+# =============================================================================
+# DMS 应用服务
+#
+# 装到 /etc/systemd/system/dms-app.service
+# 注意：ExecStart 必须写成**一行**。之前用反斜杠续行，systemd 把缩进也带进了
+#       参数里，JVM 把 "  -Duser.language=zh" 当成主类名，服务起不来。
+# =============================================================================
+[Unit]
+Description=DMS Application (Document Management System)
+Documentation=file:/opt/dms/docs/03-部署手册.md
+After=network.target postgresql.service redis-server.service minio.service
+Wants=minio.service
+
+[Service]
+Type=simple
+User=dms
+Group=dms
+WorkingDirectory=/opt/dms
+# profile 显式指定，不依赖 jar 打包时的默认值：
+#   jar 内置 application.yml 里 profiles.active 是 dev，这里用命令行参数盖掉（优先级最高），
+#   于是外部配置文件名必须是 application-prod.yml，两者必须成对。
+ExecStart=/usr/bin/java -Xms@@JVM_XMS@@ -Xmx@@JVM_XMX@@ -XX:+UseG1GC -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8 -Duser.language=zh -Duser.country=CN -Duser.timezone=Asia/Shanghai -jar /opt/dms/dms-app.jar --spring.profiles.active=prod --spring.config.additional-location=file:/opt/dms/config/
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/dms/logs/stdout.log
+StandardError=append:/opt/dms/logs/stderr.log
+
+# ---- 安全加固（P0）----
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectHome=true
+ProtectSystem=strict
+# 可写路径白名单：应用自己写的目录都要在这里，否则报 Read-only file system
+# （站点图标目录就曾漏掉，导致上传图标一直失败）
+ReadWritePaths=/opt/dms/logs /opt/dms/export /opt/dms/site-assets /opt/dms/zip-async /var/dms/tus /var/dms/tmp
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

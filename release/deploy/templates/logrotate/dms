@@ -1,0 +1,11 @@
+# /etc/logrotate.d/dms —— 应用日志轮转（systemd 的 stdout/stderr 是 append 写入，不会自动轮转）
+/opt/dms/logs/*.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    dateext
+}

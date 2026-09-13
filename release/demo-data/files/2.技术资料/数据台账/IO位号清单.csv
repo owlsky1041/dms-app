@@ -1,0 +1,9 @@
+﻿位号,描述,信号类型,I/O 卡件,通道,柜号,备注
+FT-1201,醋酸进料流量,AI 4-20mA,AI-01,CH01,CP-01,带 HART
+PT-1202,反应器压力,AI 4-20mA,AI-01,CH02,CP-01,带 HART
+TT-1203A,反应器温度 上,RTD Pt100,RTD-01,CH01,CP-01,三线制
+TT-1203B,反应器温度 中,RTD Pt100,RTD-01,CH02,CP-01,三线制
+LT-1204,中间罐液位,AI 4-20mA,AI-02,CH05,CP-02,
+FV-1206,进料调节阀,AO 4-20mA,AO-01,CH01,CP-01,Fail Close
+PSH-1207,高压联锁,DI 干接点,DI-02,CH03,CP-02,进 SIS
+DT-1211,可燃气体高报,DI 干接点,DI-03,CH07,CP-03,进 SIS

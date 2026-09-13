@@ -1,0 +1,8 @@
+[Unit]
+Description=DMS 备份（数据库 + MinIO 对象 + 配置）
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dms/backup/backup.sh
+Nice=10
+IOSchedulingClass=idle

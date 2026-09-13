@@ -1,0 +1,16 @@
+# MinIO 对象存储（单机单盘）。装到 /etc/systemd/system/minio.service
+[Unit]
+Description=MinIO Object Storage
+After=network.target
+
+[Service]
+User=@@MINIO_USER@@
+Group=@@MINIO_USER@@
+EnvironmentFile=-/etc/default/minio
+ExecStart=/usr/local/bin/minio server $MINIO_VOLUMES $MINIO_OPTS
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
