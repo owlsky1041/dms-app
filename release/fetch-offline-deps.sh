@@ -14,7 +14,7 @@
 # 用法：
 #   ./fetch-offline-deps.sh                 # 下载 deb + 复制本机二进制
 #   ./fetch-offline-deps.sh --with-onlyoffice
-#   ./fetch-offline-deps.sh --from-server root@192.168.9.62
+#   ./fetch-offline-deps.sh --from-server root@<已有服务器>
 #       从已有生产服务器取二进制与镜像（保证版本与已验证环境完全一致，推荐）
 # =============================================================================
 set -Eeuo pipefail
