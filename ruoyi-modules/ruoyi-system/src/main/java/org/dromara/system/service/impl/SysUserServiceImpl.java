@@ -467,14 +467,18 @@ public class SysUserServiceImpl implements ISysUserService, UserService {
 
         List<Long> roleList = new ArrayList<>(Arrays.asList(roleIds));
 
-        // 非超级管理员，禁止包含超级管理员角色
-        if (!LoginHelper.isSuperAdmin(userId)) {
-            roleList.remove(SystemConstants.SUPER_ADMIN_ROLE_ID);
+        // 「超级管理员」角色是内置账号的占位行：sys_role_menu 里 0 条记录，
+        // 真正的超管权限是 SysPermissionServiceImpl 按用户 ID 注入 *:*:* 给的，
+        // 跟这个角色没有关系。所以把它分给别人＝什么权限都不给，
+        // 却会在「用户管理」里显示成"这人也是超级管理员"，把"谁是管理员"这件事搞糊。
+        // 一律剔除；判断依据是"选没选这个角色"，与操作者是谁无关。
+        if (roleList.remove(SystemConstants.SUPER_ADMIN_ROLE_ID)) {
+            log.info("已忽略为其他用户分配「超级管理员」角色的请求: userId={}", userId);
         }
 
-        // 移除超管角色后若无剩余角色，说明仅选了超管角色且不允许分配，显式报错
+        // 剔除后没有剩余角色：说明只选了内置超管角色，显式报错而不是静默给个空角色
         if (roleList.isEmpty()) {
-            throw new ServiceException("不允许为普通用户分配超级管理员角色，请至少选择一个其他角色");
+            throw new ServiceException("「超级管理员」是内置账号专用角色，不能分配给其他用户，请至少选择一个其他角色");
         }
 
         // 校验是否有权限访问这些角色（含数据权限控制）

@@ -45,6 +45,18 @@ public interface DocFolderPermissionMapper extends MPJBaseMapper<DocFolderPermis
                  @Param("deptIds") Collection<Long> deptIds);
 
     /**
+     * 批量列出多个文件夹的权限条目（用于展示「继承自上级」的授权）
+     *
+     * @param folderIds 文件夹 ID 集合，调用方需保证非空
+     */
+    @Select("<script>" +
+            "SELECT * FROM doc_folder_permission WHERE folder_id IN " +
+            "<foreach collection='folderIds' item='fid' open='(' separator=',' close=')'>#{fid}</foreach>" +
+            " ORDER BY folder_id, granted_at DESC" +
+            "</script>")
+    List<DocFolderPermission> listByFolderIds(@Param("folderIds") Collection<Long> folderIds);
+
+    /**
      * 列出文件夹的所有权限条目
      */
     @Select("SELECT * FROM doc_folder_permission WHERE folder_id = #{folderId} ORDER BY granted_at DESC")

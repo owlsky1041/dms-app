@@ -75,24 +75,75 @@ public class OnlyOfficeServiceImpl implements OnlyOfficeService {
     private final ISysConfigService configService;
     private final PermissionService permissionService;
 
-    /** OnlyOffice 文档服务地址（浏览器可访问） */
-    @Value("${dms.onlyoffice.url:http://127.0.0.1:8081}")
-    private String onlyOfficeUrl;
+    // ==================================================================
+    // OnlyOffice 配置项
+    //
+    // 取值顺序：系统参数（sys_config） → 配置文件（application-dev.yml） → 内置默认。
+    // 放进系统参数是为了改完即时生效：以前改 document-base-url 或 secret
+    // 得改 yml 再重启整个服务，运维代价太大。
+    // 每次使用都现取（ISysConfigService 自带缓存），不缓存在字段里。
+    // ==================================================================
 
-    /**
-     * OnlyOffice 服务端取文档时使用的本站地址。
-     * 留空则与浏览器一致；容器内访问宿主机建议显式配置。
-     */
+    /** 系统参数 key（与「系统参数」页面里登记的保持一致） */
+    public static final String CFG_URL = "dms.onlyoffice.url";
+    public static final String CFG_DOCUMENT_BASE_URL = "dms.onlyoffice.documentBaseUrl";
+    public static final String CFG_SECRET = "dms.onlyoffice.secret";
+    public static final String CFG_INTERNAL_URL = "dms.onlyoffice.internalUrl";
+    public static final String CFG_ENABLED = "dms.onlyoffice.enabled";
+
+    /** OnlyOffice 文档服务地址（浏览器可访问）——配置文件里的兜底值 */
+    @Value("${dms.onlyoffice.url:http://127.0.0.1:8081}")
+    private String onlyOfficeUrlDefault;
+
+    /** OnlyOffice 服务端取文档时使用的本站地址 */
     @Value("${dms.onlyoffice.document-base-url:}")
-    private String documentBaseUrl;
+    private String documentBaseUrlDefault;
 
     /** 令牌签名密钥 */
     @Value("${dms.onlyoffice.secret:dms-onlyoffice-secret}")
-    private String secret;
+    private String secretDefault;
+
+    /** 文档服务内部调用地址（后端 → 文档服务） */
+    @Value("${dms.onlyoffice.internal-url:http://127.0.0.1:8081}")
+    private String internalUrlDefault;
+
+    /** 系统参数优先，其次配置文件，最后给默认值；空串视为"没配" */
+    private String cfg(String key, String fallback) {
+        try {
+            String v = configService.selectConfigByKey(key);
+            if (StringUtils.isNotBlank(v)) {
+                return v.trim();
+            }
+        } catch (Exception e) {
+            log.warn("读取系统参数 {} 失败，改用配置文件: {}", key, e.getMessage());
+        }
+        return fallback;
+    }
+
+    /** OnlyOffice 文档服务地址（浏览器可访问） */
+    private String onlyOfficeUrl() {
+        return cfg(CFG_URL, onlyOfficeUrlDefault);
+    }
+
+    /** OnlyOffice 服务端取文档时使用的本站地址（留空 = 与 onlyOfficeUrl 同源） */
+    private String documentBaseUrl() {
+        return cfg(CFG_DOCUMENT_BASE_URL, documentBaseUrlDefault);
+    }
+
+    /** 令牌签名密钥 */
+    private String secret() {
+        return cfg(CFG_SECRET, secretDefault);
+    }
 
     /** 文档服务内部调用地址（后端 → 文档服务，用于读取支持格式等） */
-    @Value("${dms.onlyoffice.internal-url:http://127.0.0.1:8081}")
-    private String internalUrl;
+    private String internalUrl() {
+        return cfg(CFG_INTERNAL_URL, internalUrlDefault);
+    }
+
+    /** 预览总开关：关掉后前端不再走 OnlyOffice（系统参数里可临时关闭排障） */
+    public boolean enabled() {
+        return !"false".equalsIgnoreCase(cfg(CFG_ENABLED, "true"));
+    }
 
     @Override
     public Map<String, String> supportedFormats() {
@@ -118,7 +169,7 @@ public class OnlyOfficeServiceImpl implements OnlyOfficeService {
      * 调文档服务的 /meta/formats，取「支持 view 动作」的扩展名及其类型
      */
     private Map<String, String> fetchFormatsFromServer() throws Exception {
-        String url = internalUrl.replaceAll("/$", "") + "/meta/formats";
+        String url = internalUrl().replaceAll("/$", "") + "/meta/formats";
         org.springframework.http.client.SimpleClientHttpRequestFactory factory =
                 new org.springframework.http.client.SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(3000);
@@ -153,11 +204,14 @@ public class OnlyOfficeServiceImpl implements OnlyOfficeService {
 
     @Override
     public Map<String, Object> buildEditorConfig(DocFile file, Long userId) {
+        if (!enabled()) {
+            throw new org.dromara.common.core.exception.ServiceException(
+                    "在线预览已被管理员关闭（系统参数 dms.onlyoffice.enabled=false）");
+        }
         String ext = file.getFileExtension() == null ? "" : file.getFileExtension().toLowerCase(Locale.ROOT);
         String documentType = supportedFormats().getOrDefault(ext, "word");
 
         String token = issueToken(file.getFileId(), userId);
-        String base = StringUtils.isBlank(documentBaseUrl) ? onlyOfficeUrl : documentBaseUrl;
         // 注意：这里必须是 OnlyOffice 服务端能访问到的地址（不是浏览器地址栏的语义）
         String fileUrl = resolveDocumentBase() + "/api/onlyoffice/file/" + token;
 
@@ -205,7 +259,7 @@ public class OnlyOfficeServiceImpl implements OnlyOfficeService {
         config.put("type", "desktop");
 
         Map<String, Object> result = new HashMap<>();
-        result.put("dsUrl", onlyOfficeUrl);
+        result.put("dsUrl", onlyOfficeUrl());
         result.put("config", config);
         result.put("watermark", wm);
         // 前端用于「下载」按钮的判定（与原预览保持一致）
@@ -219,7 +273,8 @@ public class OnlyOfficeServiceImpl implements OnlyOfficeService {
      * 因此默认回退到 127.0.0.1（同机部署），生产建议显式配置 document-base-url。
      */
     private String resolveDocumentBase() {
-        return StringUtils.isBlank(documentBaseUrl) ? "http://127.0.0.1" : documentBaseUrl;
+        String configured = documentBaseUrl();
+        return StringUtils.isBlank(configured) ? "http://127.0.0.1" : configured;
     }
 
     /** 文档 key：OnlyOffice 用它做缓存标识，内容变化需换 key，这里用 fileId+更新时间 */
@@ -271,7 +326,7 @@ public class OnlyOfficeServiceImpl implements OnlyOfficeService {
     private String sign(String data) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(secret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             byte[] raw = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
         } catch (Exception e) {

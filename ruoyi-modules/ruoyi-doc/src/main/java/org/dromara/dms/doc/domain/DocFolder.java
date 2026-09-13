@@ -76,4 +76,13 @@ public class DocFolder implements Serializable {
     /** Service 层使用的辅助查询条件：是否在回收站 */
     @TableField(exist = false)
     private Boolean inRecycleBin;
+
+    /**
+     * 当前用户对该文件夹的权限位（非数据库字段，列表接口里填充）
+     *
+     * <p>前端据此决定「下载文件夹(zip)」等入口是否可用。
+     * 与 {@code DocFile.userFlags} 语义一致，缺省视为无权限。
+     */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Integer userFlags;
 }

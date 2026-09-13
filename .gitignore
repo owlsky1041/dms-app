@@ -53,3 +53,10 @@ nbdist/
 
 application-local.yml
 application-ga.yml
+
+######################################################################
+# 本项目（DMS）额外忽略
+
+# 构建工具状态：.javac-home 是为了在受限沙箱里编译而设的 JAVA_TOOL_OPTIONS=-Duser.home，
+# 里面只有 maven 的增量标记，属于本机构建产物，不该进版本库（曾被误提交）
+.javac-home/

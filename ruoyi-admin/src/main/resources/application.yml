@@ -114,8 +114,17 @@ security:
     # 站点配置：登录页需要在未登录状态读取站点名称/备案/版权与图标
     - /api/site/config
     - /api/site/favicon
+    - /api/site/logo
+    # 用户自助注册 / 邮箱验证码找回密码：此时用户尚未登录，必须允许匿名访问
+    # 安全性由业务层保证（注册开关、验证码 5 分钟有效、同账号 60 秒限发一次、连错 5 次作废）
+    - /api/site/register
+    - /api/site/password/code
+    - /api/site/password/reset
     # OnlyOffice 取文档：由服务端直接拉取，无法携带登录态，改用短期 HMAC 令牌校验
     - /api/onlyoffice/file/**
+    # 图片/视频直链：<img src> / <video src> 带不上 Authorization 头，
+    # 同样改用短期 HMAC 令牌，控制器里每次访问都重新校验预览权限
+    - /api/doc/media/**
 
 # MyBatisPlus配置
 # https://baomidou.com/config/
@@ -392,11 +401,61 @@ dms:
     asset-dir: /opt/dms/site-assets
   # OnlyOffice 文档服务
   onlyoffice:
-    # 浏览器访问文档服务的地址
-    url: http://dms.example.internal:8081
-    # 文档服务反向拉取本站文档用的地址（容器访问宿主机；留空则用 127.0.0.1）
-    document-base-url: http://dms.example.internal
+    # 浏览器访问文档服务的地址（默认本机：部署时由外部配置按实际情况覆盖）
+    url: http://127.0.0.1:8081
+    # 文档服务反向拉取本站文档用的地址（容器访问宿主机，需填宿主机可达地址；
+    # 生产部署在 /opt/dms/config/application-prod.yml 里按本机地址设置）
+    document-base-url: http://127.0.0.1
     # 文档服务内部调用地址（后端 -> 文档服务，用于读取支持格式等）
     internal-url: http://127.0.0.1:8081
     # 临时下载令牌签名密钥
     secret: dms-onlyoffice-2026
+  # 音视频处理（海报图 / 时长 / 非浏览器友好格式转 mp4 预览版）
+  video:
+    # ffmpeg / ffprobe 可执行文件（Debian 13: apt install ffmpeg）
+    ffmpeg-bin: ffmpeg
+    ffprobe-bin: ffprobe
+    # 预览版目标码率上限（kbps），控制转码产物体积
+    preview-bitrate-kbps: 1500
+    # 单次转码最长等待时间（秒）；超时放弃预览版，不影响原文件下载
+    transcode-timeout-seconds: 1800
+    # 超过该大小（MB）不做转码，避免超大视频长时间占用 CPU
+    max-transcode-size-mb: 2048
+  # 下载
+  download:
+    # 打包下载（流式 ZIP）
+    zip:
+      # 单次最多打包的文件数；超出时提示分批下载
+      max-files: 2000
+      # 单次最大未压缩字节数，默认 4GB。
+      # 刻意压在 4GB 以内：超过会触发 ZIP64 扩展，旧解压工具可能不支持
+      max-bytes: 4294967296
+      # 超过下列任一阈值时，前端改为提交「异步导出任务」（有进度、不受长连接时长限制）
+      async-threshold-bytes: 1073741824    # 1GB
+      async-threshold-files: 500
+      # 异步导出的 ZIP 落盘目录（一次性中间产物，过期由定时任务清理）
+      async-dir: /opt/dms/export
+      # 成品保留小时数
+      async-retention-hours: 24
+      # 同时打包的任务数上限
+      async-concurrency: 2
+      # 单用户同时进行中的任务数上限
+      async-max-active-per-user: 2
+      # 待执行任务的扫描间隔
+      async-poll-ms: 3000
+      # RUNNING 超过该分钟数视为卡死，重新排队（应对应用重启）
+      async-stale-minutes: 30
+      async-recover-cron: "0 */10 * * * ?"
+      async-cleanup-cron: "0 15 * * * ?"
+  # 业务审计
+  audit:
+    # 是否记录「预览」。
+    # 预览是高频动作，全记会让审计表迅速膨胀；默认关闭，
+    # 需要追溯"谁看过哪些文件"时再打开。
+    record-preview: false
+  # 回收站
+  recycle:
+    # 保留天数：超过则被定时任务物理清理（0 或负数 = 不自动清理）
+    retention-days: 7
+    # 自动清理任务的 cron（默认每天凌晨 3:30）
+    cleanup-cron: "0 30 3 * * ?"

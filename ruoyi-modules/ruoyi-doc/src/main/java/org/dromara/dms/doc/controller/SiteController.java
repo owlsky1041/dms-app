@@ -8,6 +8,7 @@ import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.dms.doc.domain.SysSiteConfig;
 import org.dromara.dms.doc.dto.SiteConfigRequest;
 import org.dromara.dms.doc.service.SiteConfigService;
+import org.dromara.dms.doc.service.SiteMailService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,11 +42,24 @@ import java.util.Map;
 public class SiteController {
 
     private final SiteConfigService siteConfigService;
+    private final SiteMailService siteMailService;
 
     /** 站点配置（公开：登录页需要） */
     @GetMapping("/config")
     public R<Map<String, Object>> config() {
-        return R.ok(toVo(siteConfigService.get()));
+        return R.ok(toPublicVo(siteConfigService.get()));
+    }
+
+    /**
+     * 站点配置完整视图（仅超级管理员）
+     *
+     * <p>公开的 {@code /config} 不能带 SMTP 账号密码，管理页需要回显这些字段，
+     * 因此单独提供一个鉴权后的接口；密码只返回「是否已设置」，不回传明文。
+     */
+    @GetMapping("/admin-config")
+    public R<Map<String, Object>> adminConfig() {
+        requireSuperAdmin();
+        return R.ok(toAdminVo(siteConfigService.get()));
     }
 
     /** 站点图标（公开），未配置时 404，前端保留默认图标 */
@@ -62,13 +76,26 @@ public class SiteController {
                 .body(bytes);
     }
 
+    /** 站点标识图（公开），未配置时 404，前端保留默认图标 */
+    @GetMapping("/logo")
+    public ResponseEntity<byte[]> logo() {
+        byte[] bytes = siteConfigService.readLogo();
+        if (bytes == null || bytes.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        SysSiteConfig config = siteConfigService.get();
+        return ResponseEntity.ok()
+                .contentType(mediaTypeOf(config.getLogo()))
+                .header("Cache-Control", "no-cache")
+                .body(bytes);
+    }
+
     /** 更新站点配置（仅超级管理员） */
     @PutMapping("/config")
     public R<Map<String, Object>> update(@RequestBody SiteConfigRequest req) {
         requireSuperAdmin();
-        SysSiteConfig config = siteConfigService.update(
-                req.getSiteName(), req.getIcp(), req.getCopyright(), LoginHelper.getUserId());
-        return R.ok(toVo(config));
+        SysSiteConfig config = siteConfigService.update(req, LoginHelper.getUserId());
+        return R.ok(toAdminVo(config));
     }
 
     /** 上传站点图标（仅超级管理员） */
@@ -79,7 +106,18 @@ public class SiteController {
             return R.fail("请选择图标文件");
         }
         SysSiteConfig config = siteConfigService.saveFavicon(file.getOriginalFilename(), file.getInputStream());
-        return R.ok(toVo(config));
+        return R.ok(toAdminVo(config));
+    }
+
+    /** 上传站点标识图（仅超级管理员） */
+    @PostMapping("/logo")
+    public R<Map<String, Object>> uploadLogo(@RequestParam("file") MultipartFile file) throws IOException {
+        requireSuperAdmin();
+        if (file == null || file.isEmpty()) {
+            return R.fail("请选择标识图文件");
+        }
+        SysSiteConfig config = siteConfigService.saveLogo(file.getOriginalFilename(), file.getInputStream());
+        return R.ok(toAdminVo(config));
     }
 
     private void requireSuperAdmin() {
@@ -88,18 +126,63 @@ public class SiteController {
         }
     }
 
-    private Map<String, Object> toVo(SysSiteConfig config) {
+    /**
+     * 公开视图：登录页需要站点名称/备案/版权/图标，以及「注册」「忘记密码」入口是否可用。
+     *
+     * <p>绝不包含 SMTP 主机、账号、密码等敏感信息。
+     */
+    private Map<String, Object> toPublicVo(SysSiteConfig config) {
+        Map<String, Object> vo = baseVo(config);
+        vo.put("registerEnabled", Boolean.TRUE.equals(config.getRegisterEnabled()));
+        // 只有「找回密码开关打开」且「邮件配置可用」时，前端才展示忘记密码入口
+        vo.put("resetEnabled", Boolean.TRUE.equals(config.getResetEnabled()));
+        vo.put("mailReady", siteMailService.isReady(config));
+        vo.put("passwordResetAvailable",
+                Boolean.TRUE.equals(config.getResetEnabled()) && siteMailService.isReady(config));
+        return vo;
+    }
+
+    /** 管理视图：公开字段 + 注册/找回/邮件配置（邮件密码仅返回是否已设置） */
+    private Map<String, Object> toAdminVo(SysSiteConfig config) {
+        Map<String, Object> vo = baseVo(config);
+        vo.put("registerEnabled", Boolean.TRUE.equals(config.getRegisterEnabled()));
+        vo.put("registerRoleIds", config.getRegisterRoleIds() == null ? "" : config.getRegisterRoleIds());
+        vo.put("resetEnabled", Boolean.TRUE.equals(config.getResetEnabled()));
+        vo.put("mailEnabled", Boolean.TRUE.equals(config.getMailEnabled()));
+        vo.put("mailHost", nullToEmpty(config.getMailHost()));
+        vo.put("mailPort", config.getMailPort() == null ? 465 : config.getMailPort());
+        vo.put("mailEncrypt", config.getMailEncrypt() == null ? "ssl" : config.getMailEncrypt());
+        vo.put("mailUsername", nullToEmpty(config.getMailUsername()));
+        vo.put("mailFrom", nullToEmpty(config.getMailFrom()));
+        vo.put("mailFromName", nullToEmpty(config.getMailFromName()));
+        // 出于安全不回传明文密码，只告知「已设置」，前端保存时空着表示不修改
+        vo.put("mailPasswordSet", config.getMailPassword() != null && !config.getMailPassword().isBlank());
+        vo.put("mailReady", siteMailService.isReady(config));
+        vo.put("passwordResetAvailable",
+                Boolean.TRUE.equals(config.getResetEnabled()) && siteMailService.isReady(config));
+        return vo;
+    }
+
+    /** 公开与管理视图共用的基础字段 */
+    private Map<String, Object> baseVo(SysSiteConfig config) {
         Map<String, Object> vo = new HashMap<>();
         vo.put("siteName", config.getSiteName());
-        vo.put("icp", config.getIcp() == null ? "" : config.getIcp());
-        vo.put("copyright", config.getCopyright() == null ? "" : config.getCopyright());
+        vo.put("icp", nullToEmpty(config.getIcp()));
+        vo.put("copyright", nullToEmpty(config.getCopyright()));
         vo.put("favicon", config.getFavicon());
-        // 带时间戳避免浏览器缓存旧图标
+        vo.put("logo", config.getLogo());
+        // 带时间戳避免浏览器缓存旧图片
         long version = config.getUpdateTime() == null ? 0L
                 : config.getUpdateTime().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
         vo.put("faviconUrl", config.getFavicon() == null || config.getFavicon().isBlank()
                 ? "" : "/api/site/favicon?v=" + version);
+        vo.put("logoUrl", config.getLogo() == null || config.getLogo().isBlank()
+                ? "" : "/api/site/logo?v=" + version);
         return vo;
+    }
+
+    private String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     private MediaType mediaTypeOf(String fileName) {

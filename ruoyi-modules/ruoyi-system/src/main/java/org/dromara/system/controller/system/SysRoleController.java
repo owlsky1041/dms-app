@@ -6,7 +6,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.domain.PageResult;
 import org.dromara.common.core.domain.R;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.core.utils.SpringUtils;
+import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.common.excel.utils.ExcelBuilder;
 import org.dromara.common.log.annotation.Log;
 import org.dromara.common.log.enums.BusinessType;
@@ -134,6 +136,19 @@ public class SysRoleController extends BaseController {
     /**
      * 修改角色权限信息（菜单权限 + 数据权限）。
      *
+     * <p><b>只允许内置超级管理员调用。</b>
+     *
+     * <p>这是整个系统权限体系的"总闸"：谁能拿到哪些权限串，全靠这个接口写
+     * {@code sys_role_menu}。一旦把 {@code system:role:edit} 放开给某个角色，
+     * 持有者就能给自己（或自己的角色）补上任意菜单——包括审计日志、系统信息，
+     * 甚至反手把 {@code *:*:*} 之外的一切都拿到，属于无限自我提权。
+     *
+     * <p>所以权限串在这里不够用（权限串本身就能被这个接口改写），必须落到"用户 ID
+     * 等于内置超管"这个不可自我修改的事实上。
+     *
+     * <p>注意：{@code checkRoleAllowed} 只挡住"超级管理员角色"这一行数据，
+     * 挡不住普通角色被塞进 {@code system:role:edit}，所以两道都要有。
+     *
      * @param role 角色参数
      * @return 操作结果
      */
@@ -142,6 +157,9 @@ public class SysRoleController extends BaseController {
     @RepeatSubmit()
     @PutMapping("/permission")
     public R<Void> editPermission(@RequestBody SysRoleBo role) {
+        if (!LoginHelper.isSuperAdmin()) {
+            throw new ServiceException("角色权限分配为内置超级管理员专属操作，请让超级管理员来改");
+        }
         roleService.checkRoleAllowed(role);
         roleService.checkRoleDataScope(role.getRoleId());
         if (roleService.updateRolePermission(role) > 0) {

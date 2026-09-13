@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.mapper.DocFileMapper;
+import org.dromara.dms.doc.service.DocNameService;
 import org.dromara.dms.doc.service.InstantUploadService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import java.time.LocalDateTime;
 public class InstantUploadServiceImpl implements InstantUploadService {
 
     private final DocFileMapper fileMapper;
+    private final DocNameService nameService;
 
     @Override
     public DocFile findByHash(String hash) {
@@ -34,6 +36,8 @@ public class InstantUploadServiceImpl implements InstantUploadService {
     @Transactional(rollbackFor = Exception.class)
     public DocFile createReference(DocFile existing, Long targetFolder, Long userId, String fileName) {
         String name = (fileName == null || fileName.isBlank()) ? existing.getFileName() : fileName;
+        // 秒传引用同样要避开目标文件夹里的同名文件
+        name = nameService.uniqueFileName(targetFolder, name);
         DocFile ref = new DocFile()
                 .setFolderId(targetFolder)
                 .setFileName(name)

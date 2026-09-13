@@ -7,6 +7,7 @@ import org.dromara.dms.doc.enums.PermissionFlag;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 权限服务接口
@@ -41,9 +42,48 @@ public interface PermissionService {
      */
     int computeUserFlags(String resourceType, Long resourceId, Long userId);
 
+    /**
+     * 批量计算一组文件的权限位（用于列表/搜索给每个文件带上 userFlags）
+     *
+     * <p>同一目录下的文件共享目录链求值结果，这里按目录缓存，
+     * 避免 N 个文件把整条目录链重复查 N 遍。
+     *
+     * @param files  文件列表
+     * @param userId 当前用户
+     * @return fileId → 权限位掩码
+     */
+    java.util.Map<Long, Integer> computeFileFlagsBatch(
+            java.util.List<org.dromara.dms.doc.domain.DocFile> files, Long userId);
+
+    /**
+     * 批量计算一组文件夹的权限位（用于列表给每个文件夹带上 userFlags）
+     *
+     * <p>与文件版同理：父链求值结果可以复用，避免 N 个子目录把整条链重复查 N 遍。
+     *
+     * @param folders 文件夹列表
+     * @param userId  当前用户
+     * @return folderId → 权限位掩码
+     */
+    java.util.Map<Long, Integer> computeFolderFlagsBatch(
+            java.util.List<org.dromara.dms.doc.domain.DocFolder> folders, Long userId);
+
     // ================= 统一校验入口 =================
     // 说明：超级管理员与资源所有者（folder.owner_id / file.creator_id）自动通过。
     // 所有写操作与读操作都必须经过这里，避免出现「列表过滤了但可直接按 id 访问」的不对称。
+
+    /**
+     * 列出「对本资源实际生效」的全部授权，含本层与继承自上级目录的
+     *
+     * <p>权限弹窗必须能看到继承来的授权：授权通常建在文档区或上级目录上，
+     * 只列本层会让用户误以为「这个文件夹没有任何权限」。
+     *
+     * @param resourceType folder / file
+     * @param resourceId   资源 ID
+     * @param operatorId   操作者（调用方需已通过完全控制校验）
+     * @return 每项含 sourceType（direct=本层可撤销 / inherited=继承只读）、
+     *         来源文件夹（sourceFolderId/Name/Path）与授权内容
+     */
+    List<Map<String, Object>> listEffectivePermissions(String resourceType, Long resourceId, Long operatorId);
 
     /**
      * 校验用户是否具备文件的指定权限位，不具备抛 ServiceException
@@ -84,4 +124,12 @@ public interface PermissionService {
      * 校验文件可管理性，不满足抛 ServiceException
      */
     void requireFileManageable(Long fileId, Long userId);
+
+    /**
+     * 校验文件夹可管理性（改名/移动），不满足抛 ServiceException
+     *
+     * <p>规则：具备「编辑」位（或历史的「完全控制」位）。「读写」档包含编辑位，
+     * 因此读写档可以改名/移动，但拿不到「分配权限」的能力。
+     */
+    void requireFolderManageable(Long folderId, Long userId);
 }

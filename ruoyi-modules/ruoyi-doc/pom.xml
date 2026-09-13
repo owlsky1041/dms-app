@@ -49,6 +49,11 @@
             <groupId>org.dromara</groupId>
             <artifactId>ruoyi-common-doc</artifactId>
         </dependency>
+        <!-- 邮件发送：站点配置中的 SMTP + 注册/找回密码验证码邮件 -->
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-mail</artifactId>
+        </dependency>
 
         <!-- ============ 数据库驱动 ============ -->
         <dependency>

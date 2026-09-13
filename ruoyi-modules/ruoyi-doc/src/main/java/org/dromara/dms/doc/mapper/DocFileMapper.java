@@ -72,6 +72,14 @@ public interface DocFileMapper extends MPJBaseMapper<DocFile> {
     int move(@Param("fileId") Long fileId, @Param("folderId") Long folderId, @Param("now") LocalDateTime now);
 
     /**
+     * 改名并移动到另一个文件夹（合并同名文件夹时用）
+     */
+    @Update("UPDATE doc_file SET folder_id = #{folderId}, file_name = #{name}, update_time = #{now} "
+          + "WHERE file_id = #{fileId} AND deleted_at IS NULL")
+    int renameAndMove(@Param("fileId") Long fileId, @Param("folderId") Long folderId,
+                      @Param("name") String name, @Param("now") LocalDateTime now);
+
+    /**
      * 检查同文件夹下同名文件
      */
     @Select("SELECT COUNT(*) > 0 FROM doc_file WHERE folder_id = #{folderId} AND file_name = #{name} AND deleted_at IS NULL")
@@ -94,6 +102,22 @@ public interface DocFileMapper extends MPJBaseMapper<DocFile> {
      */
     @Select("SELECT * FROM doc_file WHERE deleted_at IS NOT NULL AND creator_id = #{userId} ORDER BY deleted_at DESC")
     List<DocFile> listDeletedByCreator(@Param("userId") Long userId);
+
+    /**
+     * 回收站中已超过保留期的文件（按删除时间升序，先删最早的）
+     */
+    @Select("SELECT * FROM doc_file WHERE deleted_at IS NOT NULL AND deleted_at < #{cutoff} ORDER BY deleted_at")
+    List<DocFile> listExpiredDeleted(@Param("cutoff") LocalDateTime cutoff);
+
+    /**
+     * 引用指定 MinIO 对象的文件记录数（含回收站里的）
+     *
+     * <p>秒传/复制会让多条记录共享同一个 storage_key，只有计数为 0 才能删物理对象。
+     *
+     * @param column 列名，只能是 storage_key / preview_key / thumbnail_key（由调用方传入常量）
+     */
+    @Select("SELECT COUNT(*) FROM doc_file WHERE ${column} = #{key} AND ${column} IS NOT NULL")
+    int countByObjectKey(@Param("column") String column, @Param("key") String key);
 
     /**
      * 全文搜索（文件名 ILIKE + 提取文本 ILIKE，支持中英文；pg_trgm 索引加速前缀/模糊）

@@ -24,7 +24,10 @@ public enum AuditAction {
     RESTORE("恢复"),
     PERMANENT_DELETE("永久删除"),
     SHARE("分享"),
-    CREATE_FOLDER("创建文件夹");
+    CREATE_FOLDER("创建文件夹"),
+    /** 日志自身的操作也要留痕：谁导出了日志、谁清了日志，本身就是最该被审计的动作 */
+    AUDIT_EXPORT("导出审计日志"),
+    AUDIT_CLEAR("清除审计日志");
 
     private final String description;
 }

@@ -12,9 +12,12 @@ import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.mapper.DocFileMapper;
 import org.dromara.dms.doc.mapper.DocFolderMapper;
+import org.dromara.dms.doc.enums.AuditAction;
 import org.dromara.dms.doc.enums.PermissionFlag;
 import org.dromara.dms.doc.service.FileProcessor;
 import org.dromara.dms.doc.service.DocFolderOwnerResolver;
+import org.dromara.dms.doc.service.AuditService;
+import org.dromara.dms.doc.service.DocNameService;
 import org.dromara.dms.doc.service.InstantUploadService;
 import org.dromara.dms.doc.service.PermissionService;
 import org.dromara.dms.doc.service.UploadCompletionDelegate;
@@ -55,6 +58,8 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
     private final InstantUploadService instantUploadService;
     private final PermissionService permissionService;
     private final DocFolderOwnerResolver ownerResolver;
+    private final DocNameService nameService;
+    private final AuditService auditService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -99,6 +104,11 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
             // 计算 SHA-256（ownerKey=真实登录 id，否则 UploadNotFound）
             finalHash = computeHash(service, uploadUrl, ownerKey);
 
+            // 目标文件夹已有同名文件 → 自动重命名为「xxx (1).ext」
+            // 注意要放在秒传分支之前，让秒传引用和真实上传拿到同一个最终名字
+            fileName = nameService.uniqueFileName(folderId, fileName);
+            fileExtension = extractExtension(fileName);
+
             DocFile existing = fileMapper.findByHash(finalHash);
             if (existing != null) {
                 log.info("Instant upload: file already exists, hash={}, existingId={}", finalHash, existing.getFileId());
@@ -138,6 +148,10 @@ public class UploadCompletionDelegateImpl implements UploadCompletionDelegate {
 
             log.info("File uploaded: id={}, name={}, size={}, hash={}",
                     file.getFileId(), fileName, file.getFileSize(), finalHash);
+            auditService.record(AuditAction.UPLOAD, "FILE", file.getFileId(), fileName,
+                    java.util.Map.of("folderId", String.valueOf(folderId),
+                            "fileSize", String.valueOf(file.getFileSize()),
+                            "hash", finalHash));
 
             // 4. 异步处理（缩略图/预览/文本提取）
             fileProcessor.processAsync(file);

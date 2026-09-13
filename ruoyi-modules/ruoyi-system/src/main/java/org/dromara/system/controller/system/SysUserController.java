@@ -10,6 +10,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.constant.CacheNames;
 import org.dromara.common.core.constant.SystemConstants;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.core.domain.PageResult;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.core.utils.StreamUtils;
@@ -197,7 +198,18 @@ public class SysUserController extends BaseController {
     @RepeatSubmit()
     @PutMapping
     public R<Void> edit(@Validated @RequestBody SysUserBo user) {
-        userService.checkUserAllowed(user.getUserId());
+        boolean editingSelf = ObjectUtil.isNotNull(user.getUserId())
+                && user.getUserId().equals(LoginHelper.getUserId());
+        if (editingSelf) {
+            // 超管允许在「用户管理」里改自己的基本资料，否则这里会直接抛
+            // 「不允许操作超级管理员用户」，连自己的手机号都改不了。
+            // 但角色与状态必须锁死：改错会把自己踢出超管、直接锁死系统。
+            user.setRoleIds(null);
+            user.setPostIds(null);
+            user.setStatus(SystemConstants.NORMAL);
+        } else {
+            userService.checkUserAllowed(user.getUserId());
+        }
         userService.checkUserDataScope(user.getUserId());
         deptService.checkDeptDataScope(user.getDeptId());
         if (!userService.checkUserNameUnique(user)) {
@@ -326,6 +338,10 @@ public class SysUserController extends BaseController {
     @RepeatSubmit()
     @PutMapping("/authRole")
     public R<Void> insertAuthRole(Long userId, Long[] roleIds) {
+        // 不允许修改自己的角色：否则超级管理员可以一键把自己降级，之后没人能改回来
+        if (ObjectUtil.isNotNull(userId) && userId.equals(LoginHelper.getUserId())) {
+            throw new ServiceException("不能修改自己的角色，请由其他管理员操作");
+        }
         userService.checkUserDataScope(userId);
         userService.insertUserAuth(userId, roleIds);
         return R.ok();

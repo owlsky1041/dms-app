@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.common.satoken.utils.LoginHelper;
+import org.dromara.dms.doc.domain.DocFile;
 import org.dromara.dms.doc.domain.DocFilePermission;
+import org.dromara.dms.doc.domain.DocFolder;
 import org.dromara.dms.doc.domain.DocFolderPermission;
 import org.dromara.dms.doc.dto.GrantPermissionRequest;
 import org.dromara.common.core.exception.ServiceException;
@@ -20,9 +22,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -65,6 +72,12 @@ public class PermissionServiceImpl implements PermissionService {
     public void grant(GrantPermissionRequest req, Long operatorId) {
         // 校验主体类型合法
         SubjectType.of(req.getSubjectType());
+        // 规格化：禁止位独占；任何授予隐含「可见」；「下载」隐含「预览」。
+        // 放在这里而不是靠前端，是为了让「下载必然含只读」成为数据层不变式
+        int permFlags = PermissionFlag.normalize(req.getPermFlags());
+        if (permFlags == 0) {
+            throw new ServiceException("请至少选择一项权限");
+        }
         LocalDateTime now = LocalDateTime.now();
 
         if ("folder".equalsIgnoreCase(req.getResourceType())) {
@@ -72,7 +85,7 @@ public class PermissionServiceImpl implements PermissionService {
                     .setFolderId(req.getResourceId())
                     .setSubjectType(req.getSubjectType())
                     .setSubjectId(req.getSubjectId())
-                    .setPermFlags(req.getPermFlags())
+                    .setPermFlags(permFlags)
                     .setInheritToChildren(req.getInheritToChildren() != null ? req.getInheritToChildren() : true)
                     .setGrantedBy(operatorId)
                     .setGrantedAt(now)
@@ -84,7 +97,7 @@ public class PermissionServiceImpl implements PermissionService {
                     .eq("subject_id", req.getSubjectId())
                     .last("LIMIT 1"));
             if (exist != null) {
-                exist.setPermFlags(req.getPermFlags());
+                exist.setPermFlags(permFlags);
                 exist.setInheritToChildren(p.getInheritToChildren());
                 exist.setExpiresAt(req.getExpiresAt());
                 exist.setGrantedBy(operatorId);
@@ -94,13 +107,13 @@ public class PermissionServiceImpl implements PermissionService {
                 folderPermMapper.insert(p);
             }
             log.info("Folder permission granted: folder={}, subject={}:{}, flags={}",
-                    req.getResourceId(), req.getSubjectType(), req.getSubjectId(), req.getPermFlags());
+                    req.getResourceId(), req.getSubjectType(), req.getSubjectId(), permFlags);
         } else if ("file".equalsIgnoreCase(req.getResourceType())) {
             DocFilePermission p = new DocFilePermission()
                     .setFileId(req.getResourceId())
                     .setSubjectType(req.getSubjectType())
                     .setSubjectId(req.getSubjectId())
-                    .setPermFlags(req.getPermFlags())
+                    .setPermFlags(permFlags)
                     .setGrantedBy(operatorId)
                     .setGrantedAt(now)
                     .setExpiresAt(req.getExpiresAt());
@@ -110,7 +123,7 @@ public class PermissionServiceImpl implements PermissionService {
                     .eq("subject_id", req.getSubjectId())
                     .last("LIMIT 1"));
             if (exist != null) {
-                exist.setPermFlags(req.getPermFlags());
+                exist.setPermFlags(permFlags);
                 exist.setExpiresAt(req.getExpiresAt());
                 exist.setGrantedBy(operatorId);
                 exist.setGrantedAt(now);
@@ -119,7 +132,7 @@ public class PermissionServiceImpl implements PermissionService {
                 filePermMapper.insert(p);
             }
             log.info("File permission granted: file={}, subject={}:{}, flags={}",
-                    req.getResourceId(), req.getSubjectType(), req.getSubjectId(), req.getPermFlags());
+                    req.getResourceId(), req.getSubjectType(), req.getSubjectId(), permFlags);
         } else {
             throw new IllegalArgumentException("resourceType 必须是 folder 或 file");
         }
@@ -146,6 +159,122 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     @Override
+    public List<Map<String, Object>> listEffectivePermissions(String resourceType, Long resourceId,
+                                                              Long operatorId) {
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        if ("folder".equalsIgnoreCase(resourceType)) {
+            DocFolder folder = folderMapper.selectById(resourceId);
+            if (folder == null) {
+                return result;
+            }
+            // 1) 本层授权（可撤销）
+            for (DocFolderPermission p : folderPermMapper.listByFolder(resourceId)) {
+                result.add(toVo(p.getPermId(), "direct", folder, p.getSubjectType(), p.getSubjectId(),
+                        p.getPermFlags(), p.getInheritToChildren(), p.getExpiresAt(), p.getGrantedBy()));
+            }
+            // 2) 祖先链上的授权（只读展示）
+            for (Long ancestorId : ancestorFolderIds(folder)) {
+                DocFolder ancestor = folderMapper.selectById(ancestorId);
+                if (ancestor == null) {
+                    continue;
+                }
+                for (DocFolderPermission p : folderPermMapper.listByFolder(ancestorId)) {
+                    result.add(toVo(p.getPermId(), "inherited", ancestor, p.getSubjectType(), p.getSubjectId(),
+                            p.getPermFlags(), p.getInheritToChildren(), p.getExpiresAt(), p.getGrantedBy()));
+                }
+            }
+            return result;
+        }
+
+        if ("file".equalsIgnoreCase(resourceType)) {
+            DocFile file = fileMapper.selectById(resourceId);
+            if (file == null) {
+                return result;
+            }
+            // 1) 文件级授权
+            for (DocFilePermission p : filePermMapper.listByFile(resourceId)) {
+                result.add(toFileVo(p.getPermId(), "direct", null, p.getSubjectType(), p.getSubjectId(),
+                        p.getPermFlags(), p.getExpiresAt()));
+            }
+            // 2) 所在文件夹及其祖先链上的授权
+            if (file.getFolderId() != null) {
+                DocFolder parent = folderMapper.selectById(file.getFolderId());
+                if (parent != null) {
+                    List<Long> chain = new ArrayList<>();
+                    chain.add(parent.getFolderId());
+                    chain.addAll(ancestorFolderIds(parent));
+                    for (Long fid : chain) {
+                        DocFolder f = folderMapper.selectById(fid);
+                        if (f == null) {
+                            continue;
+                        }
+                        for (DocFolderPermission p : folderPermMapper.listByFolder(fid)) {
+                            result.add(toFileVo(p.getPermId(), "inherited", f, p.getSubjectType(),
+                                    p.getSubjectId(), p.getPermFlags(), p.getExpiresAt()));
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+        throw new IllegalArgumentException("resourceType 必须是 folder 或 file");
+    }
+
+    /** 由物化路径解析祖先文件夹 ID（不含自身、不含虚拟根 0） */
+    private List<Long> ancestorFolderIds(DocFolder folder) {
+        Set<Long> ids = new LinkedHashSet<>();
+        String path = folder.getFolderPath();
+        if (path == null || path.isBlank()) {
+            return List.of();
+        }
+        for (String part : path.split("/")) {
+            String s = part.trim();
+            if (s.isEmpty()) {
+                continue;
+            }
+            try {
+                long id = Long.parseLong(s);
+                // 0 是虚拟根；自身要排除（本层授权已单独列出）
+                if (id != 0L && !Long.valueOf(id).equals(folder.getFolderId())) {
+                    ids.add(id);
+                }
+            } catch (NumberFormatException ignored) {
+                // 忽略非法片段
+            }
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /** 组装一条「生效授权」的返回结构 */
+    private Map<String, Object> toVo(Long permId, String sourceType, DocFolder source,
+                                     String subjectType, Long subjectId, int permFlags,
+                                     Boolean inheritToChildren, LocalDateTime expiresAt, Long grantedBy) {
+        Map<String, Object> vo = new LinkedHashMap<>();
+        vo.put("permId", permId);
+        vo.put("sourceType", sourceType);
+        if (source != null) {
+            vo.put("sourceFolderId", source.getFolderId());
+            vo.put("sourceFolderName", source.getFolderName());
+            vo.put("sourceFolderPath", source.getFolderPath());
+        }
+        vo.put("subjectType", subjectType);
+        vo.put("subjectId", subjectId);
+        vo.put("permFlags", permFlags);
+        vo.put("inheritToChildren", inheritToChildren);
+        vo.put("expiresAt", expiresAt);
+        vo.put("grantedBy", grantedBy);
+        return vo;
+    }
+
+    /** 文件继承来源没有 inherit_to_children 语义，单独组装 */
+    private Map<String, Object> toFileVo(Long permId, String sourceType, DocFolder source,
+                                         String subjectType, Long subjectId, int permFlags,
+                                         LocalDateTime expiresAt) {
+        return toVo(permId, sourceType, source, subjectType, subjectId, permFlags, null, expiresAt, null);
+    }
+
+    @Override
     public int computeUserFlags(String resourceType, Long resourceId, Long userId) {
         // 与列表/搜索过滤共用同一主体解析，避免两处口径不一致
         Collection<Long> roleIds = scopeResolver.currentRoleIds();
@@ -156,6 +285,71 @@ public class PermissionServiceImpl implements PermissionService {
             return computeFileFlags(resourceId, userId, roleIds, deptIds);
         }
         throw new IllegalArgumentException("resourceType 必须是 folder 或 file");
+    }
+
+    @Override
+    public Map<Long, Integer> computeFileFlagsBatch(List<DocFile> files, Long userId) {
+        Map<Long, Integer> result = new LinkedHashMap<>();
+        if (files == null || files.isEmpty()) {
+            return result;
+        }
+        if (LoginHelper.isSuperAdmin()) {
+            files.forEach(f -> result.put(f.getFileId(), PermissionFlag.FULL));
+            return result;
+        }
+        Collection<Long> roleIds = scopeResolver.currentRoleIds();
+        Collection<Long> deptIds = scopeResolver.currentDeptIds();
+        // 同一目录的文件共享目录链结果，缓存一次即可
+        Map<Long, FolderEval> folderCache = new HashMap<>();
+        for (DocFile f : files) {
+            FolderEval fe = null;
+            if (f.getFolderId() != null) {
+                fe = folderCache.computeIfAbsent(f.getFolderId(),
+                        fid -> evalFolderChain(fid, userId, roleIds, deptIds));
+                if (fe.owner()) {
+                    result.put(f.getFileId(), PermissionFlag.FULL);
+                    continue;
+                }
+            }
+            int fileFlags = filePermMapper.sumFlags(f.getFileId(), userId, roleIds, deptIds);
+            if ((fileFlags & PermissionFlag.DENY.getCode()) != 0 || (fe != null && fe.denied())) {
+                result.put(f.getFileId(), 0);
+                continue;
+            }
+            int flags = fileFlags | (fe != null ? fe.flags() : 0);
+            if (userId != null && userId.equals(f.getCreatorId())) {
+                flags |= PermissionFlag.DELETE.getCode();
+            }
+            result.put(f.getFileId(), flags & ~PermissionFlag.DENY.getCode());
+        }
+        return result;
+    }
+
+    @Override
+    public Map<Long, Integer> computeFolderFlagsBatch(List<DocFolder> folders, Long userId) {
+        Map<Long, Integer> result = new LinkedHashMap<>();
+        if (folders == null || folders.isEmpty()) {
+            return result;
+        }
+        if (LoginHelper.isSuperAdmin()) {
+            folders.forEach(f -> result.put(f.getFolderId(), PermissionFlag.FULL));
+            return result;
+        }
+        Collection<Long> roleIds = scopeResolver.currentRoleIds();
+        Collection<Long> deptIds = scopeResolver.currentDeptIds();
+        Map<Long, FolderEval> cache = new HashMap<>();
+        for (DocFolder f : folders) {
+            FolderEval eval = cache.computeIfAbsent(f.getFolderId(),
+                    fid -> evalFolderChain(fid, userId, roleIds, deptIds));
+            if (eval.owner()) {
+                result.put(f.getFolderId(), PermissionFlag.FULL);
+            } else if (eval.denied()) {
+                result.put(f.getFolderId(), 0);
+            } else {
+                result.put(f.getFolderId(), eval.flags());
+            }
+        }
+        return result;
     }
 
     // ================= 统一校验入口 =================
@@ -314,14 +508,28 @@ public class PermissionServiceImpl implements PermissionService {
         }
         Collection<Long> roleIds = scopeResolver.currentRoleIds();
         Collection<Long> deptIds = scopeResolver.currentDeptIds();
-        return PermissionFlag.has(computeFileFlags(fileId, userId, roleIds, deptIds),
-                PermissionFlag.FULL_CONTROL);
+        // 改名/移动看「编辑」位；「完全控制」也接受（历史数据只有 128 的情况）
+        return PermissionFlag.canManage(computeFileFlags(fileId, userId, roleIds, deptIds));
     }
 
     @Override
     public void requireFileManageable(Long fileId, Long userId) {
         if (!canManageFile(fileId, userId)) {
-            throw new ServiceException("无重命名/移动权限（需完全控制，或为本人上传的文件）");
+            throw new ServiceException("无重命名/移动权限（需读写及以上档位，或为本人上传的文件）");
+        }
+    }
+
+    @Override
+    public void requireFolderManageable(Long folderId, Long userId) {
+        if (folderId == null || folderId == 0L) {
+            return;
+        }
+        if (LoginHelper.isSuperAdmin()) {
+            return;
+        }
+        int flags = computeUserFlags("folder", folderId, userId);
+        if (!PermissionFlag.canManage(flags)) {
+            throw new ServiceException("无重命名/移动权限（需读写及以上档位）");
         }
     }
 }

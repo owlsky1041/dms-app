@@ -62,7 +62,11 @@ public class SysUserBo implements Serializable {
 
     /**
      * 用户邮箱
+     *
+     * <p>必填：找回密码要靠它发信，没有邮箱的账号一旦忘记密码就只能人工重置。
+     * 校验放在这里而不是只放前端——直接调接口建用户同样会被拦住。
      */
+    @NotBlank(message = "邮箱不能为空")
     @Email(message = "邮箱格式不正确")
     @Size(min = 0, max = 50, message = "邮箱长度不能超过{max}个字符")
     private String email;

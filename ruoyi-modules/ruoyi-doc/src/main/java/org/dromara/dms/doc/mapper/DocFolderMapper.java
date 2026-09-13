@@ -71,10 +71,32 @@ public interface DocFolderMapper extends MPJBaseMapper<DocFolder> {
     List<DocFolder> listDeletedFoldersByOwner(@Param("userId") Long userId);
 
     /**
+     * 回收站中已超过保留期的文件夹
+     *
+     * <p>按 folder_path 升序：父目录的路径是其子目录路径的前缀，排序后父一定在子之前，
+     * 这样清理时先删父（连同子树），子目录的分支会被跳过而不会重复处理。
+     */
+    @Select("SELECT * FROM doc_folder WHERE deleted_at IS NOT NULL AND deleted_at < #{cutoff} "
+          + "ORDER BY folder_path, folder_id")
+    List<DocFolder> listExpiredDeletedFolders(@Param("cutoff") LocalDateTime cutoff);
+
+    /**
      * 物理删除文件夹（连同其物化路径子树）
      */
     @Select("SELECT folder_id FROM doc_folder WHERE folder_path LIKE CONCAT(#{pathPrefix}, '%') OR folder_id = #{folderId}")
     List<Long> listSubtreeIds(@Param("folderId") Long folderId, @Param("pathPrefix") String pathPrefix);
+
+    /**
+     * 批量平移子树的物化路径（移动文件夹后同步后代）
+     *
+     * <p>用 overlay 做前缀替换而不是 replace：replace 会把路径中间偶然出现的
+     * 相同片段也换掉，overlay 只替换开头的固定长度前缀，语义准确。
+     */
+    @Update("UPDATE doc_folder SET folder_path = overlay(folder_path placing #{newPrefix} from 1 for length(#{oldPrefix})), "
+          + "update_time = #{now} WHERE folder_path LIKE CONCAT(#{oldPrefix}, '%')")
+    int updateDescendantPaths(@Param("oldPrefix") String oldPrefix,
+                              @Param("newPrefix") String newPrefix,
+                              @Param("now") LocalDateTime now);
 
     /**
      * 物理删除
@@ -94,6 +116,13 @@ public interface DocFolderMapper extends MPJBaseMapper<DocFolder> {
     @Update("UPDATE doc_folder SET parent_id = #{newParentId}, folder_path = #{newPath}, update_time = #{now} WHERE folder_id = #{folderId} AND deleted_at IS NULL")
     int move(@Param("folderId") Long folderId, @Param("newParentId") Long newParentId,
              @Param("newPath") String newPath, @Param("now") LocalDateTime now);
+
+    /**
+     * 按名字查子文件夹（用于「合并内容」时定位已存在的同名文件夹）
+     */
+    @Select("SELECT * FROM doc_folder WHERE parent_id = #{parentId} AND folder_name = #{name} "
+          + "AND deleted_at IS NULL ORDER BY folder_id LIMIT 1")
+    DocFolder findChildByName(@Param("parentId") Long parentId, @Param("name") String name);
 
     /**
      * 检查同名文件夹是否存在（同 parent_id 下）
